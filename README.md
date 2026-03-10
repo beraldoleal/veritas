@@ -76,27 +76,32 @@ Output goes to stdout by default. Use `-o` to write to a file.
 
 ## What it computes
 
-| Component | Azure (SHA-256) | Baremetal TDX (SHA-384) | Baremetal SNP (SHA-384) |
+| <div style="width:300px">Component</div> | Azure (SHA-256) | Baremetal TDX (SHA-384) | Baremetal SNP (SHA-384) |
 |---|---|---|---|
-| **Software** | | | |
-| Firmware (OVMF) | pcr03 | mr_td | *combined in `measurement`* |
-| Kernel | | tdvfkernel | *combined in `measurement`* |
-| Kernel cmdline | | tdvfkernelparams | *combined in `measurement`* |
-| Initrd | pcr09 | initrd | *combined in `measurement`* |
-| UKI bundle | pcr11 | | |
-| Credentials | pcr12 | | |
-| Init data | pcr08 | | |
-| Launch digest | | | measurement |
-| **Hardware** | | | |
-| TEE firmware | | mr_seam | |
-| TCB version | | tcb_svn | reported_tcb_* |
-| CPU features | | xfam | |
-| Debug policy | | td_attributes | policy_debug_allowed |
-| SMT policy | | | platform_smt_enabled |
+| 🟢 💾 Firmware (OVMF) | pcr03 | mr_td | *combined in `measurement`* |
+| 🟢 💾 Kernel | | tdvfkernel | *combined in `measurement`* |
+| 🟢 💾 Kernel cmdline | | tdvfkernelparams | *combined in `measurement`* |
+| 🟢 💾 Initrd | pcr09 | initrd | *combined in `measurement`* |
+| 🔴 💾 Runtime registers | | rtmr_0, rtmr_1, rtmr_2 | |
+| 🟢 💾 UKI bundle | pcr11 | | |
+| 🟢 💾 Credentials | pcr12 | | |
+| 🟢 💾 Launch digest | | | measurement |
+| 🟢 ⚙️ Init data | pcr08 | init_data (mr_config_id) | init_data |
+| 🔴 🔒 TEE type | | tee_type | |
+| 🔴 🔒 Vendor ID | | vendor_id | |
+| 🔴 🔒 TEE firmware | | mr_seam | |
+| 🔴 🔒 TCB version | | tcb_svn | reported_tcb_* |
+| 🔴 🔒 TCB status | | tcb_status | |
+| 🔴 🔒 Collateral expiry | | collateral_expiration_status | |
+| 🔴 🔒 CPU features | | xfam | |
+| 🔴 🔒 Debug policy | | td_attributes | policy_debug_allowed |
+| 🔴 🔒 SMT policy | | | platform_smt_enabled |
 
-Software values are pre-computable from the cluster artifacts.
-Hardware values must be captured from a running TD or SNP guest.
-Veritas does not collect hardware values yet.
+🟢 supported by veritas · 🔴 not yet supported
+
+💾 software: pre-computable from cluster artifacts
+⚙️ user config: computed from user-provided input (e.g. initdata.toml)
+🔒 hardware: can't be pre-computed, must come from a live TD quote
 
 ## Output examples
 
@@ -212,6 +217,7 @@ not match.
 ## TODO
 
 - [ ] Remove vendored QEMU patching logic once RHEL ships a fixed QEMU
+- [ ] Integrate tdx-measure for RTMR computation (rtmr_0, rtmr_1, rtmr_2)
 - [ ] Collect hardware values (mr_seam, tcb_svn, xfam) from a running TD
 - [ ] Discover kernel command line from kata configuration instead of hardcoding
 - [ ] CGPU (Confidential GPU) support
