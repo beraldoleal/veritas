@@ -1,15 +1,16 @@
-"""Extract and display CoCo reference values for Trustee RVPS."""
+"""Extract CoCo reference values for Trustee RVPS."""
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
 
-from veritas.models import group_by_category, format_trustee
+from veritas.models import format_trustee
 from veritas.platforms import EXTRACTORS
 
 log = logging.getLogger(__name__)
+
+RVPS_FILENAME = "rvps-reference-values.yaml"
 
 
 def main():
@@ -18,9 +19,8 @@ def main():
     parser.add_argument("--tee", default="tdx", choices=["tdx", "snp"])
     parser.add_argument("--authfile", help="Registry auth file for pulling images")
     parser.add_argument("--initdata", help="Path to initdata.toml for hash computation")
-    parser.add_argument("-f", "--format", default="json", choices=["json", "trustee"],
-                        help="Output format: json (default) or trustee (RVPS ConfigMap YAML)")
-    parser.add_argument("-o", "--output", help="Output file (default: stdout)")
+    parser.add_argument("-o", "--output", default=".",
+                        help="Output directory (default: current directory)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     args = parser.parse_args()
 
@@ -39,20 +39,12 @@ def main():
         log.error("%s", e)
         sys.exit(1)
 
-    if args.format == "trustee":
-        result = format_trustee(values, extractor.platform)
-    else:
-        result = json.dumps({
-            "platform": extractor.platform,
-            "evidence_type": extractor.evidence_type,
-            **group_by_category(values),
-        }, indent=2) + "\n"
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.output:
-        Path(args.output).write_text(result)
-        log.info("Written to %s", args.output)
-    else:
-        print(result, end="")
+    rvps_path = output_dir / RVPS_FILENAME
+    rvps_path.write_text(format_trustee(values, extractor.platform, args.tee))
+    log.info("Written %s", rvps_path)
 
 
 if __name__ == "__main__":
