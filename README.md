@@ -3,25 +3,23 @@
 > Not the woodworking kind. This one computes attestation truth.
 
 Extracts attestation reference values for OpenShift Sandboxed
-Containers from the actual cluster artifacts.
+Containers from OCP release artifacts and Red Hat registry images.
 
-Point it at your OCP cluster, get the values Trustee needs.
+Point it at an OCP version, get the values Trustee needs.
 
 > [!WARNING]
-> For baremetal, veritas uses `oc adm release info` to resolve the
-> extensions image from the cluster's OCP release. If the cluster is
-> compromised, the resolved artifacts could be tampered with. Make
-> sure you trust the cluster before using these values for attestation.
-> For Azure, artifacts are pulled directly from the Red Hat registry
-> and signature verified via cosign.
+> For baremetal, veritas resolves the extensions image from the OCP
+> release payload and verifies its signature with `oc adm release info
+> --verify`. For Azure, artifacts are pulled from the Red Hat registry
+> and signature verified via cosign. No cluster access is required.
 
 ## Why
 
 Trustee needs RVPS reference values to verify confidential workloads.
-These values come from the exact firmware, kernel, and initrd that the
-cluster runs. Veritas pulls those artifacts directly from the OCP
-release (pinned by digest), computes the hashes, and outputs them
-ready for Trustee.
+These values come from the exact firmware, kernel, and initrd shipped
+in each OCP release. Veritas pulls those artifacts directly from the
+release payload (pinned by digest), computes the hashes, and outputs
+them ready for Trustee.
 
 ## Supported platforms
 
@@ -296,7 +294,8 @@ not match.
 
 ### High priority
 
-- [x] Remove cluster dependency: resolve extension image by OCP version, verify release payload, no kubeconfig needed.
+- [x] Remove cluster dependency: resolve extension image by OCP version, verify release payload, no kubeconfig needed
+- [x] Support multiple OCP/OSC versions with merged reference values
 - [ ] Add `--kernel-cmdline` flag and document how users can get the current cmdline (kata config on node, `nr_cpus` added at runtime per pod CPU request)
 
 ### Other
