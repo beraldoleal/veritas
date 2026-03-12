@@ -7,11 +7,10 @@ Containers from OCP release artifacts and Red Hat registry images.
 
 Point it at an OCP version, get the values Trustee needs.
 
-> [!WARNING]
-> For baremetal, veritas resolves the extensions image from the OCP
-> release payload and verifies its signature with `oc adm release info
-> --verify`. For Azure, artifacts are pulled from the Red Hat registry
-> and signature verified via cosign. No cluster access is required.
+For baremetal, veritas resolves the extensions image from the OCP
+release payload and verifies its signature with `oc adm release info
+--verify`. For Azure, artifacts are pulled from the Red Hat registry
+and signature verified via cosign. No cluster access is required.
 
 ## Why
 
@@ -56,6 +55,11 @@ veritas --platform baremetal --tee tdx --ocp-version 4.20.6 --ocp-version 4.20.1
 
 # Include initdata hash
 veritas --platform baremetal --tee tdx --ocp-version 4.20.15 --authfile pull-secret.json --initdata initdata.toml
+
+# Include hardware xfam value from a live TDX quote. This value comes from
+# the CPU/platform and cannot be pre-computed from software artifacts. Collect
+# it once from a running TD (see "Collecting hardware values" below).
+veritas --platform baremetal --tee tdx --ocp-version 4.20.15 --authfile pull-secret.json --hw-xfam e702060000000000
 
 # Output to a specific directory
 veritas --platform baremetal --tee tdx --ocp-version 4.20.15 --authfile pull-secret.json -o trustee-config/
@@ -140,7 +144,7 @@ Maps each value checked by the [upstream default Rego policy](https://github.com
 | 📋 Collateral expiry | *"0"* | - | - | - |
 | 📋 Debug policy | *false* | *false* | - | - |
 | 📋 Migration policy | - | *false* | - | - |
-| 🔒 CPU features (xfam) | 🔴 xfam | - | 🔴 xfam | - |
+| 🔒 CPU features (xfam) | ✅ xfam (--hw-xfam) | - | ✅ xfam (--hw-xfam) | - |
 | 🔒 TCB version | - | 🔴 reported_tcb_* | - | 🔴 reported_tcb_* |
 | 🔒 SMT policy | - | 🔴 platform_smt_enabled | - | 🔴 smt_enabled |
 | 🔒 TSME | - | 🔴 platform_tsme_enabled | - | 🔴 tsme_enabled |
@@ -148,7 +152,7 @@ Maps each value checked by the [upstream default Rego policy](https://github.com
 | 🔒 Single socket | - | 🔴 policy_single_socket | - | 🔴 single_socket |
 | 🔒 SMT allowed | - | 🔴 policy_smt_allowed | - | 🔴 smt_allowed |
 
-✅ veritas computes<br>
+✅ veritas computes (or accepts via CLI)<br>
 🔴 not yet provided<br>
 ~~strikethrough~~ not individually checked (may be part of a combined value)<br>
 \- does not exist
@@ -156,13 +160,25 @@ Maps each value checked by the [upstream default Rego policy](https://github.com
 💾 software: pre-computable from artifacts<br>
 ⚙️ user config<br>
 📋 policy checks against hardcoded values (no RVPS reference needed)<br>
-🔒 hardware: needs live quote
+🔒 hardware: needs live quote (collect once, pass via `--hw-*` flags)
+
+### Being removed from upstream policy ⁴
+
+These checks are being removed from the upstream default Rego policy.
+Veritas does not output them.
+
+| Policy check | Reason for removal |
+|---|---|
+| 🔒 SEAM module (mr_seam) | Redundant with tcb_status. TDX module hash is published by [Intel](https://github.com/intel/confidential-computing.tdx.tdx-module/releases) but impractical to discover from the BIOS vendor. |
+| 🔒 TCB SVN (tcb_svn) | Already implicitly checked by the DCAP verifier as part of tcb_status. |
 
 <small><i>¹ QEMU patches the kernel setup header (memory addresses, initrd location) before OVMF measures it. The hash depends on the VM memory layout, which may vary with different kata configurations. This is a known QEMU bug, already fixed upstream but not yet in RHEL. Once RHEL picks up the fix, a plain PE hash of vmlinuz will match.</i></small>
 
 <small><i>² The kernel command line includes nr_cpus=N which kata sets based on the pod's CPU resource request. A pod requesting 4 CPUs will have a different hash than one requesting 1. Veritas currently hardcodes nr_cpus=1. This is unrelated to the QEMU bug and will remain an issue until the cmdline is discovered dynamically or multiple reference values are supported for different CPU counts.</i></small>
 
 <small><i>³ rtmr_0 accumulates firmware configuration events (TD HOB, CFV, SecureBoot variables, ACPI tables). Computing it offline requires the exact ACPI tables that QEMU generates at VM creation time. tdx-measure can generate these but only for Ubuntu, not RHEL. See [virtee/tdx-measure#19](https://github.com/virtee/tdx-measure/issues/19).</i></small>
+
+<small><i>⁴ tcb_svn is already implicitly verified by the DCAP verifier as part of tcb_status, making the explicit RVPS check redundant. mr_seam (the TDX module hash) is published per version at [intel/confidential-computing.tdx.tdx-module](https://github.com/intel/confidential-computing.tdx.tdx-module/releases) but is impractical to discover from the BIOS vendor in practice, and is also covered by tcb_status. Both are planned to be removed from the upstream default policy.</i></small>
 
 ## Output example
 
@@ -219,6 +235,13 @@ data:
         "value": [
           "3c764645b39c6402b5c9f2df3d32eedf3b880ebc9de89bf3..."
         ]
+      },
+      {
+        "name": "xfam",
+        "expiration": "2099-12-31T00:00:00Z",
+        "value": [
+          "e702060000000000"
+        ]
       }
     ]
 ```
@@ -268,6 +291,33 @@ data:
 
 Apply directly with `oc apply -f rvps-reference-values.yaml`.
 
+## Collecting hardware values
+
+Some RVPS values come from the CPU/platform and cannot be pre-computed
+from software artifacts. These must be collected once from a running TD
+on the target hardware.
+
+Currently the only hardware value veritas needs is `xfam` (the extended
+features mask). To collect it:
+
+1. Deploy a kata-cc pod with initdata pointing to Trustee (permissive
+   policy recommended for ExecProcessRequest)
+2. Trigger attestation from inside the pod:
+   `curl http://127.0.0.1:8006/cdh/resource/default/attestation-status/status`
+3. Read the xfam value from Trustee debug logs (`RUST_LOG=debug`),
+   or from the parsed TDX quote body
+
+The xfam value is stable for a given CPU generation and kata/QEMU
+configuration. It only needs to be collected once per hardware platform.
+
+> [!WARNING]
+> **Baremetal TDX: xfam is required by the default attestation policy.**
+> If `--hw-xfam` is not provided, veritas will not include xfam in the
+> output and the default upstream policy will fail the configuration
+> trust claim. Either pass `--hw-xfam` with a value collected from a
+> live TD (see "Collecting hardware values" above), or customize the
+> attestation policy to skip the xfam check.
+
 ## Known limitations
 
 **tdvfkernel uses vendored patching logic.** RHEL's QEMU 9.1.0
@@ -279,10 +329,6 @@ QEMU's patching logic (based on
 Once RHEL ships a newer QEMU that skips patching for TDX guests
 (already fixed upstream), this vendored code can be removed and
 a plain hash of vmlinuz will suffice.
-
-**Hardware values are not collected.** Values like xfam come from the
-TDX hardware and cannot be pre-computed. They must be captured from a
-running TD and added to the RVPS manually.
 
 **Kernel command line is hardcoded.** The kata kernel command line is
 assembled at runtime from multiple source files in the kata-containers
@@ -302,7 +348,7 @@ not match.
 
 - [ ] Remove vendored QEMU patching logic once RHEL ships a fixed QEMU
 - [ ] Compute rtmr_0 (requires ACPI tables, blocked by [virtee/tdx-measure#19](https://github.com/virtee/tdx-measure/issues/19))
-- [ ] Collect hardware values (xfam) from a running TD
+- [x] Accept hardware xfam value via `--hw-xfam` flag
 - [ ] Investigate downstream policy PCR checks ([openshift/trustee-operator#291](https://github.com/openshift/trustee-operator/pull/291)): adds pcr03, pcr08, pcr09, pcr12 for Azure SNP/TDX
 - [ ] CI: validate RVPS keys against policy using OPA (detect missing keys and unused keys)
 - [ ] CGPU (Confidential GPU) support

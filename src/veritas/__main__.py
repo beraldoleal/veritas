@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--osc-version", action="append", dest="osc_versions",
                         help="OSC dm-verity image tag (azure only, repeatable). Defaults to latest")
     parser.add_argument("--initdata", help="Path to initdata.toml for hash computation")
+    parser.add_argument("--hw-xfam",
+                        help="TDX XFAM value from a live quote (TDX only, e.g. e702060000000000)")
     parser.add_argument("-o", "--output", default=".",
                         help="Output directory (default: current directory)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
@@ -44,6 +46,27 @@ def main():
         values = extractor.extract()
         if args.initdata:
             values.append(extractor.compute_initdata(args.initdata))
+        if args.hw_xfam:
+            if args.tee != "tdx":
+                log.warning("--hw-xfam is only relevant for TDX, ignoring")
+            else:
+                from veritas.models import ReferenceValue
+                algo = "sha256" if args.platform == "azure" else "sha384"
+                values.append(ReferenceValue(
+                    name="xfam",
+                    values=[args.hw_xfam],
+                    category="hardware",
+                    description="Extended features mask (XSAVE CPU features enabled for the TD)",
+                    algorithm=algo,
+                    source="live TDX quote (--hw-xfam)",
+                ))
+        if args.tee == "tdx" and not args.hw_xfam:
+            log.warning(
+                "No --hw-xfam provided. The default upstream attestation policy "
+                "checks xfam and will FAIL without it. Either pass --hw-xfam with "
+                "a value from a live TDX quote, or customize the policy to skip "
+                "the xfam check."
+            )
     except RuntimeError as e:
         log.error("%s", e)
         sys.exit(1)
