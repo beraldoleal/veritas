@@ -135,7 +135,7 @@ Maps each value checked by the [upstream default Rego policy](https://github.com
 | 💾 Launch digest | - | ✅ snp_launch_measurement | - | ✅ measurement |
 | 💾 Kernel ¹ | ✅ tdvfkernel | ~~part of measur.~~ | - | - |
 | 💾 Kernel cmdline | ✅ tdvfkernelparams | ~~part of measur.~~ | - | - |
-| 💾 Initrd | ~~initrd~~ | ~~part of measur.~~ | ~~tdx_pcr09~~ | ~~snp_pcr09~~ |
+| 💾 Initrd | ~~part of rtmr_2~~ | ~~part of measur.~~ | ✅ tdx_pcr09 | ✅ snp_pcr09 |
 | 💾 Runtime register 1 | ✅ rtmr_1 | - | - | - |
 | 💾 Runtime register 2 | ✅ rtmr_2 | - | - | - |
 | 💾 UKI bundle | - | - | ✅ tdx_pcr11 | ✅ snp_pcr11 |
@@ -205,13 +205,6 @@ data:
           "2314211f527fb49d1e548228084c444dfe1c5221bd2f411f...",
           "a1b2c3d4e5f6...",
           "... (one per nr_cpus=1..32)"
-        ]
-      },
-      {
-        "name": "initrd",
-        "expiration": "2099-12-31T00:00:00Z",
-        "value": [
-          "3ec83629255e3071cf5a9ae5a26e6174deddf4dcdb164cac..."
         ]
       },
       {
@@ -404,7 +397,7 @@ TODO: track when kata stops varying nr_cpus in the cmdline.
 - [x] Accept hardware xfam value via `--hw-xfam` flag
 - [ ] Add `--xfam-allow` to compute xfam bitmask from feature names (e.g. `--xfam-allow x87,sse,avx,avx512,amx`), replacing `--hw-xfam` as the recommended path
 - [x] Add `--mem-size` to override the default 2 GB VM memory assumption for tdvfkernel hash
-- [ ] Drop standalone `initrd` from RVPS output (pending: clarify if OVMF measures initrd as a separate UEFI event on Red Hat baremetal)
+- [x] Drop standalone `initrd` from RVPS output (not checked by any policy, already covered by rtmr_2)
 - [ ] Investigate downstream policy PCR checks ([openshift/trustee-operator#291](https://github.com/openshift/trustee-operator/pull/291)): adds pcr03, pcr08, pcr09, pcr12 for Azure SNP/TDX
 - [ ] CI: validate RVPS keys against policy using OPA (detect missing keys and unused keys)
 - [ ] CGPU (Confidential GPU) support

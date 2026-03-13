@@ -238,18 +238,6 @@ class BaremetalExtractor(PlatformExtractor):
             source=source,
         ))
 
-        if "initrd" in artifact_paths:
-            initrd_data = artifact_paths["initrd"].read_bytes()
-            initrd_hash = hashlib.sha384(initrd_data).hexdigest()
-            values.append(ReferenceValue(
-                name="initrd",
-                values=[initrd_hash],
-                category="executables",
-                description="Initrd (kata-cc.initrd) digest from UEFI event log",
-                algorithm="sha384",
-                source="kata-containers RPM (sha384 of file)",
-            ))
-
         mr_td = self._compute_mr_td(artifact_paths.get("ovmf_tdx"))
         if mr_td:
             values.append(mr_td)
