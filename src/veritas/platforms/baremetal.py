@@ -26,6 +26,17 @@ DEFAULT_KERNEL_CMDLINE = (
     "cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1"
 )
 
+# GPU pod kernel command line.
+# Uses devtmpfs.mount=0 instead of systemd.unified_cgroup_hierarchy=1
+GPU_KERNEL_CMDLINE = (
+    "tsc=reliable no_timer_check rcupdate.rcu_expedited=1 "
+    "i8042.direct=1 i8042.dumbkbd=1 i8042.nopnp=1 i8042.noaux=1 "
+    "noreplace-smp reboot=k cryptomgr.notests net.ifnames=0 "
+    "pci=lastbus=0 console=hvc0 console=hvc1 debug panic=1 "
+    "nr_cpus={nr_cpus} selinux=0 scsi_mod.scan=none agent.log=debug "
+    "cgroup_no_v1=all devtmpfs.mount=0"
+)
+
 
 class BaremetalExtractor(PlatformExtractor):
     """Extract reference values from kata artifacts in rhel-coreos-extensions."""
@@ -38,12 +49,14 @@ class BaremetalExtractor(PlatformExtractor):
     KATA_RPM_GLOB = "kata-containers-*.rpm"
     EDK2_RPM_GLOB = "edk2-ovmf-*.rpm"
     EXTENSIONS_PATH = "/usr/share/rpm-ostree/extensions"
+    INITRD_GLOB = "osbuilder-images/*/kata-cc.initrd"
+    GPU_INITRD_GLOB = "osbuilder-images/*/kata-*gpu*.initrd"
 
     OCP_RELEASE_REPO = "quay.io/openshift-release-dev/ocp-release"
 
     def __init__(self, tee, authfile=None, ocp_versions=None,
                  kernel_cmdline=None, max_cpu_count=32, mem_size=0x80000000,
-                 kata_rpm=None):
+                 kata_rpm=None, gpu=False):
         if tee not in self.EVIDENCE_TYPES:
             raise ValueError(f"Unknown TEE: {tee}. Must be one of {list(self.EVIDENCE_TYPES)}")
         if not ocp_versions:
@@ -55,19 +68,25 @@ class BaremetalExtractor(PlatformExtractor):
         self.max_cpu_count = max_cpu_count
         self.mem_size = mem_size
         self.kata_rpm = Path(kata_rpm) if kata_rpm else None
+        self.gpu = gpu
         if self.kata_rpm and not self.kata_rpm.exists():
             raise ValueError(f"Kata RPM not found: {self.kata_rpm}")
 
-    def _kernel_cmdlines(self):
+    def _kernel_cmdlines(self, is_gpu=False):
         """Return list of kernel cmdlines to compute measurements for.
 
         If --kernel-cmdline was provided, returns just that cmdline.
-        Otherwise generates one per CPU count using the default template.
+        Otherwise generates one per CPU count using the appropriate template.
+
+        Args:
+            is_gpu: If True, uses GPU cmdline template. Ignored if --kernel-cmdline is set.
         """
         if self.kernel_cmdline:
             return [self.kernel_cmdline]
+
+        template = GPU_KERNEL_CMDLINE if is_gpu else DEFAULT_KERNEL_CMDLINE
         return [
-            DEFAULT_KERNEL_CMDLINE.format(nr_cpus=n)
+            template.format(nr_cpus=n)
             for n in range(1, self.max_cpu_count + 1)
         ]
 
@@ -206,10 +225,17 @@ class BaremetalExtractor(PlatformExtractor):
                 artifacts["vmlinuz"] = vmlinuz_candidates[0]
                 log.info("Found vmlinuz: %s", artifacts["vmlinuz"])
 
-            initrd_candidates = list(extract_path.rglob("osbuilder-images/*/kata-cc.initrd"))
+            # Detect regular initrd
+            initrd_candidates = list(extract_path.rglob(self.INITRD_GLOB))
             if initrd_candidates:
                 artifacts["initrd"] = initrd_candidates[0]
                 log.info("Found initrd: %s", artifacts["initrd"])
+
+            # Detect GPU initrd
+            gpu_initrd_candidates = list(extract_path.rglob(self.GPU_INITRD_GLOB))
+            if gpu_initrd_candidates:
+                artifacts["gpu_initrd"] = gpu_initrd_candidates[0]
+                log.info("Found GPU initrd: %s", artifacts["gpu_initrd"])
 
             ovmf_tdx = list(extract_path.rglob("OVMF.inteltdx.fd"))
             if ovmf_tdx:
@@ -221,20 +247,59 @@ class BaremetalExtractor(PlatformExtractor):
                 artifacts["ovmf_snp"] = ovmf_snp[0]
                 log.info("Found OVMF.amdsev.fd: %s", artifacts["ovmf_snp"])
 
-            if "vmlinuz" not in artifacts or "initrd" not in artifacts:
-                missing = [k for k in ("vmlinuz", "initrd") if k not in artifacts]
-                log.error("Missing %s in kata RPM. Cannot compute "
-                          "measurements. Attestation will NOT work on this "
-                          "version. Make sure baremetal CoCo is supported "
-                          "for this OCP release.", missing)
+            if "vmlinuz" not in artifacts:
+                log.error("Missing vmlinuz in kata RPM. Cannot compute measurements.")
                 return []
 
-            if self.tee == "tdx":
-                return self._compute_tdx_values(artifacts)
-            else:
-                return self._compute_snp_values(artifacts)
+            # Compute measurements based on --kernel-cmdline and --gpu flags
+            if self.kernel_cmdline:
+                # Manual mode: use specified cmdline with appropriate initrd
+                if self.gpu and "gpu_initrd" not in artifacts:
+                    log.error("--gpu specified but no GPU initrd found in kata RPM")
+                    return []
+                if not self.gpu and "initrd" not in artifacts:
+                    log.error("No regular initrd found in kata RPM")
+                    return []
 
-    def _compute_tdx_values(self, artifact_paths: dict) -> list[ReferenceValue]:
+                initrd_key = "gpu_initrd" if self.gpu else "initrd"
+                log.info("Using %s initrd with custom cmdline", "GPU" if self.gpu else "regular")
+                return self._compute_values_for_variant(artifacts, initrd_key, is_gpu=self.gpu)
+            else:
+                # Auto mode: generate for available variants
+                all_values = []
+
+                if "initrd" in artifacts:
+                    log.info("Generating measurements for regular (non-GPU) pods")
+                    all_values.extend(self._compute_values_for_variant(artifacts, "initrd", is_gpu=False))
+
+                if "gpu_initrd" in artifacts:
+                    log.info("Generating measurements for GPU pods")
+                    all_values.extend(self._compute_values_for_variant(artifacts, "gpu_initrd", is_gpu=True))
+
+                if not all_values:
+                    log.error("No initrd files found in kata RPM")
+                    return []
+
+                return all_values
+
+    def _compute_values_for_variant(self, artifacts: dict, initrd_key: str, is_gpu: bool) -> list[ReferenceValue]:
+        """Compute measurements for a specific variant (GPU or non-GPU).
+
+        Args:
+            artifacts: Dict of artifact paths
+            initrd_key: Key in artifacts dict for the initrd to use ("initrd" or "gpu_initrd")
+            is_gpu: True for GPU variant, False for regular
+        """
+        # Create a copy of artifacts with the selected initrd as "initrd"
+        variant_artifacts = artifacts.copy()
+        variant_artifacts["initrd"] = artifacts[initrd_key]
+
+        if self.tee == "tdx":
+            return self._compute_tdx_values(variant_artifacts, is_gpu=is_gpu)
+        else:
+            return self._compute_snp_values(variant_artifacts, is_gpu=is_gpu)
+
+    def _compute_tdx_values(self, artifact_paths: dict, is_gpu: bool = False) -> list[ReferenceValue]:
         """Compute TDX reference values."""
         values = []
 
@@ -257,7 +322,7 @@ class BaremetalExtractor(PlatformExtractor):
                 source="kata-containers RPM (PE Authenticode hash, QEMU-patched)",
             ))
 
-        cmdlines = self._kernel_cmdlines()
+        cmdlines = self._kernel_cmdlines(is_gpu=is_gpu)
         # TDX UEFI event log measures the cmdline with "initrd=initrd" suffix
         # and null terminator, encoded as UTF-16-LE.
         cmdline_hashes = []
@@ -266,8 +331,10 @@ class BaremetalExtractor(PlatformExtractor):
             h = hashlib.sha384(tdx_cmdline.encode("utf-16-le")).hexdigest()
             if h not in cmdline_hashes:
                 cmdline_hashes.append(h)
-        source = "kernel cmdline (--kernel-cmdline)" if self.kernel_cmdline else \
-            f"default kata cmdline, nr_cpus=1..{self.max_cpu_count}"
+        variant = "GPU " if is_gpu else ""
+        source = f"kernel cmdline (--kernel-cmdline --gpu)" if (self.kernel_cmdline and is_gpu) else \
+            f"kernel cmdline (--kernel-cmdline)" if self.kernel_cmdline else \
+            f"{variant}default kata cmdline, nr_cpus=1..{self.max_cpu_count}"
         values.append(ReferenceValue(
             name="tdvfkernelparams",
             values=cmdline_hashes,
@@ -281,16 +348,20 @@ class BaremetalExtractor(PlatformExtractor):
         if mr_td:
             values.append(mr_td)
 
-        rtmrs = self._compute_rtmrs(artifact_paths)
+        rtmrs = self._compute_rtmrs(artifact_paths, is_gpu=is_gpu)
         values.extend(rtmrs)
 
         return values
 
-    def _compute_snp_values(self, artifact_paths: dict) -> list[ReferenceValue]:
+    def _compute_snp_values(self, artifact_paths: dict, is_gpu: bool = False) -> list[ReferenceValue]:
         """Compute SNP launch measurement using sev-snp-measure.
 
         Runs sev-snp-measure once per kernel cmdline variant. The vcpus
         parameter also varies with nr_cpus since kata sets both together.
+
+        Args:
+            artifact_paths: Dict of artifact paths
+            is_gpu: True for GPU variant, False for regular
         """
         ovmf = artifact_paths.get("ovmf_snp")
         vmlinuz = artifact_paths.get("vmlinuz")
@@ -307,7 +378,7 @@ class BaremetalExtractor(PlatformExtractor):
         except ImportError:
             raise RuntimeError("sev-snp-measure is not installed (pip install sev-snp-measure)")
 
-        cmdlines = self._kernel_cmdlines()
+        cmdlines = self._kernel_cmdlines(is_gpu=is_gpu)
         measurements = []
 
         for cmdline in cmdlines:
@@ -338,20 +409,29 @@ class BaremetalExtractor(PlatformExtractor):
         log.info("Computed SNP measurements for %d cmdline variant(s), "
                  "%d unique", len(cmdlines), len(measurements))
 
+        variant = "GPU " if is_gpu else ""
+        source_suffix = f"kernel cmdline (--kernel-cmdline --gpu)" if (self.kernel_cmdline and is_gpu) else \
+            f"kernel cmdline (--kernel-cmdline)" if self.kernel_cmdline else \
+            f"{variant}default kata cmdline, nr_cpus=1..{self.max_cpu_count}"
+
         return [ReferenceValue(
             name="snp_launch_measurement",
             values=measurements,
             category="executables",
             description="SNP launch measurement (OVMF + kernel + initrd + cmdline)",
             algorithm="sha384",
-            source="sev-snp-measure",
+            source=f"sev-snp-measure ({source_suffix})",
         )]
 
-    def _compute_rtmrs(self, artifact_paths: dict) -> list[ReferenceValue]:
+    def _compute_rtmrs(self, artifact_paths: dict, is_gpu: bool = False) -> list[ReferenceValue]:
         """Compute RTMR1 and RTMR2 using tdx-measure --runtime-only.
 
         Runs tdx-measure once per kernel cmdline variant (one per CPU count,
         or a single user-provided cmdline). Merges unique values.
+
+        Args:
+            artifact_paths: Dict of artifact paths
+            is_gpu: True for GPU variant, False for regular
         """
         if not shutil.which("tdx-measure"):
             log.warning("tdx-measure not found, skipping RTMR computation")
@@ -363,7 +443,7 @@ class BaremetalExtractor(PlatformExtractor):
             log.warning("Missing kernel or initrd, skipping RTMR computation")
             return []
 
-        cmdlines = self._kernel_cmdlines()
+        cmdlines = self._kernel_cmdlines(is_gpu=is_gpu)
         rtmr1_values = []
         rtmr2_values = []
 
@@ -404,6 +484,11 @@ class BaremetalExtractor(PlatformExtractor):
                  "%d unique rtmr_1, %d unique rtmr_2",
                  len(cmdlines), len(rtmr1_values), len(rtmr2_values))
 
+        variant = "GPU " if is_gpu else ""
+        source_suffix = f"kernel cmdline (--kernel-cmdline --gpu)" if (self.kernel_cmdline and is_gpu) else \
+            f"kernel cmdline (--kernel-cmdline)" if self.kernel_cmdline else \
+            f"{variant}default kata cmdline, nr_cpus=1..{self.max_cpu_count}"
+
         values = []
         if rtmr1_values:
             values.append(ReferenceValue(
@@ -412,7 +497,7 @@ class BaremetalExtractor(PlatformExtractor):
                 category="executables",
                 description="Runtime measurement register 1 (kernel + boot services)",
                 algorithm="sha384",
-                source="tdx-measure --runtime-only",
+                source=f"tdx-measure --runtime-only ({source_suffix})",
             ))
         if rtmr2_values:
             values.append(ReferenceValue(
@@ -421,7 +506,7 @@ class BaremetalExtractor(PlatformExtractor):
                 category="executables",
                 description="Runtime measurement register 2 (kernel cmdline + initrd)",
                 algorithm="sha384",
-                source="tdx-measure --runtime-only",
+                source=f"tdx-measure --runtime-only ({source_suffix})",
             ))
         return values
 

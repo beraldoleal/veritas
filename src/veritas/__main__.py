@@ -36,6 +36,10 @@ def main():
                         help="Path to a local kata-containers RPM. When set, uses this "
                         "RPM instead of the one from the OCP release extensions image. "
                         "An --ocp-version is still required to resolve the edk2 RPM.")
+    parser.add_argument("--gpu", action="store_true",
+                        help="Generate measurements for GPU pods (uses kata-cc-nvidia-gpu.initrd "
+                        "and GPU-specific cmdline). When used with --kernel-cmdline, picks the "
+                        "GPU initrd. Without --kernel-cmdline, auto-generates both GPU and non-GPU.")
     parser.add_argument("--initdata", help="Path to initdata.toml for hash computation")
     parser.add_argument("--hw-xfam-allow", action="append", dest="hw_xfam_allow",
                         help="XFAM CPU feature enabled for the TD (TDX only, repeatable). "
@@ -62,6 +66,7 @@ def main():
             kwargs["max_cpu_count"] = args.max_cpu_count
             kwargs["mem_size"] = args.mem_size * 1024 * 1024
             kwargs["kata_rpm"] = args.kata_rpm
+            kwargs["gpu"] = args.gpu
         extractor = extractor_cls(**kwargs)
         values = extractor.extract()
         if args.initdata:
