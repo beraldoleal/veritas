@@ -13,7 +13,7 @@ class PlatformExtractor(ABC):
         """Compute and return all reference values."""
 
     @abstractmethod
-    def compute_initdata(self, initdata_path: str) -> ReferenceValue:
+    def compute_initdata(self, initdata_paths: list[str]) -> ReferenceValue:
         """Compute initdata reference value for this platform."""
 
     @property

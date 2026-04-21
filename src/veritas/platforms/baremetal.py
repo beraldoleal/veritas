@@ -143,17 +143,20 @@ class BaremetalExtractor(PlatformExtractor):
                     merged[v.name] = v
         return list(merged.values())
 
-    def compute_initdata(self, initdata_path: str) -> ReferenceValue:
-        """Compute initdata hash for baremetal TDX (sha384)."""
-        content = Path(initdata_path).read_bytes()
-        digest = hashlib.sha384(content).hexdigest()
+    def compute_initdata(self, initdata_paths: list[str]) -> ReferenceValue:
+        """Compute initdata hash for baremetal (sha384)."""
+        digests = []
+        for p in initdata_paths:
+            content = Path(p).read_bytes()
+            digests.append(hashlib.sha384(content).hexdigest())
+        sources = ", ".join(Path(p).name for p in initdata_paths)
         return ReferenceValue(
             name="init_data",
-            values=[digest],
+            values=digests,
             category="configuration",
             description="Init data hash",
             algorithm="sha384",
-            source="computed from initdata.toml",
+            source=f"computed from {sources}",
         )
 
     def _verify_release(self, ocp_version: str):

@@ -40,7 +40,9 @@ def main():
                         help="Generate measurements for GPU pods (uses kata-cc-nvidia-gpu.initrd "
                         "and GPU-specific cmdline). When used with --kernel-cmdline, picks the "
                         "GPU initrd. Without --kernel-cmdline, auto-generates both GPU and non-GPU.")
-    parser.add_argument("--initdata", help="Path to initdata.toml for hash computation")
+    parser.add_argument("--initdata", action="append", dest="initdata_paths",
+                        help="Path to initdata.toml for hash computation (repeatable)")
+
     parser.add_argument("--hw-xfam-allow", action="append", dest="hw_xfam_allow",
                         help="XFAM CPU feature enabled for the TD (TDX only, repeatable). "
                         "e.g. --hw-xfam-allow x87 --hw-xfam-allow sse --hw-xfam-allow avx")
@@ -69,8 +71,8 @@ def main():
             kwargs["gpu"] = args.gpu
         extractor = extractor_cls(**kwargs)
         values = extractor.extract()
-        if args.initdata:
-            values.append(extractor.compute_initdata(args.initdata))
+        if args.initdata_paths:
+            values.append(extractor.compute_initdata(args.initdata_paths))
         if args.hw_xfam_allow:
             if args.tee != "tdx":
                 log.warning("--hw-xfam-allow is only relevant for TDX, ignoring")

@@ -76,18 +76,21 @@ class AzureExtractor(PlatformExtractor):
 
         return list(merged.values())
 
-    def compute_initdata(self, initdata_path: str) -> ReferenceValue:
+    def compute_initdata(self, initdata_paths: list[str]) -> ReferenceValue:
         """Compute PCR8: sha256(32_zero_bytes || sha256(initdata_content))."""
-        content = Path(initdata_path).read_bytes()
-        inner = hashlib.sha256(content).digest()
-        outer = hashlib.sha256(b"\x00" * 32 + inner).hexdigest()
+        digests = []
+        for p in initdata_paths:
+            content = Path(p).read_bytes()
+            inner = hashlib.sha256(content).digest()
+            digests.append(hashlib.sha256(b"\x00" * 32 + inner).hexdigest())
+        sources = ", ".join(Path(p).name for p in initdata_paths)
         return ReferenceValue(
             name=self._rvps_key("pcr08"),
-            values=[outer],
+            values=digests,
             category="configuration",
             description="Init data (initdata.toml extended into PCR8)",
             algorithm="sha256",
-            source="computed from initdata.toml",
+            source=f"computed from {sources}",
         )
 
     def _rvps_key(self, pcr_name: str) -> str:
