@@ -234,11 +234,11 @@ class BaremetalExtractor(PlatformExtractor):
                 artifacts["initrd"] = initrd_candidates[0]
                 log.info("Found initrd: %s", artifacts["initrd"])
 
-            # Detect GPU initrd
+            # Detect GPU initrds (there may be cc and non-cc variants)
             gpu_initrd_candidates = list(extract_path.rglob(self.GPU_INITRD_GLOB))
-            if gpu_initrd_candidates:
-                artifacts["gpu_initrd"] = gpu_initrd_candidates[0]
-                log.info("Found GPU initrd: %s", artifacts["gpu_initrd"])
+            artifacts["gpu_initrds"] = gpu_initrd_candidates
+            for g in gpu_initrd_candidates:
+                log.info("Found GPU initrd: %s", g)
 
             ovmf_tdx = list(extract_path.rglob("OVMF.inteltdx.fd"))
             if ovmf_tdx:
@@ -257,16 +257,26 @@ class BaremetalExtractor(PlatformExtractor):
             # Compute measurements based on --kernel-cmdline and --gpu flags
             if self.kernel_cmdline:
                 # Manual mode: use specified cmdline with appropriate initrd
-                if self.gpu and "gpu_initrd" not in artifacts:
+                if self.gpu and not artifacts["gpu_initrds"]:
                     log.error("--gpu specified but no GPU initrd found in kata RPM")
                     return []
                 if not self.gpu and "initrd" not in artifacts:
                     log.error("No regular initrd found in kata RPM")
                     return []
 
-                initrd_key = "gpu_initrd" if self.gpu else "initrd"
-                log.info("Using %s initrd with custom cmdline", "GPU" if self.gpu else "regular")
-                return self._compute_values_for_variant(artifacts, initrd_key, is_gpu=self.gpu)
+                if self.gpu:
+                    all_values = []
+                    for gpu_initrd in artifacts["gpu_initrds"]:
+                        log.info("Using GPU initrd with custom cmdline: %s", gpu_initrd.name)
+                        variant = artifacts.copy()
+                        variant["initrd"] = gpu_initrd
+                        all_values.extend(self._compute_tdx_values(variant, is_gpu=True)
+                                          if self.tee == "tdx"
+                                          else self._compute_snp_values(variant, is_gpu=True))
+                    return all_values
+                else:
+                    log.info("Using regular initrd with custom cmdline")
+                    return self._compute_values_for_variant(artifacts, "initrd", is_gpu=False)
             else:
                 # Auto mode: generate for available variants
                 all_values = []
@@ -275,9 +285,13 @@ class BaremetalExtractor(PlatformExtractor):
                     log.info("Generating measurements for regular (non-GPU) pods")
                     all_values.extend(self._compute_values_for_variant(artifacts, "initrd", is_gpu=False))
 
-                if "gpu_initrd" in artifacts:
-                    log.info("Generating measurements for GPU pods")
-                    all_values.extend(self._compute_values_for_variant(artifacts, "gpu_initrd", is_gpu=True))
+                for gpu_initrd in artifacts["gpu_initrds"]:
+                    log.info("Generating measurements for GPU pods: %s", gpu_initrd.name)
+                    variant = artifacts.copy()
+                    variant["initrd"] = gpu_initrd
+                    all_values.extend(self._compute_tdx_values(variant, is_gpu=True)
+                                      if self.tee == "tdx"
+                                      else self._compute_snp_values(variant, is_gpu=True))
 
                 if not all_values:
                     log.error("No initrd files found in kata RPM")
