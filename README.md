@@ -61,6 +61,23 @@ veritas --platform azure --tee tdx \
 Output is written to the current directory by default.
 Use `-o` to specify a different directory.
 
+### BoT version compatibility
+
+Veritas generates reference values in the format expected by Red Hat
+build of Trustee (BoT). The format changed in BoT 1.2 (OSC 1.13):
+
+```bash
+# For OSC 1.13+ (BoT 1.2) - default
+veritas --platform baremetal --tee tdx --ocp-version 4.20.15
+
+# For OSC 1.12 and earlier (BoT 1.1)
+veritas --platform baremetal --tee tdx --ocp-version 4.20.15 --bot-version 1.1
+```
+
+The format difference is transparent at the API level but incompatible
+between versions. Verify your OSC/BoT version and use the matching
+`--bot-version` flag.
+
 > [!NOTE]
 > The defaults match standard kata configurations and OCP artifacts.
 > If your environment uses different settings (VM memory size, kernel

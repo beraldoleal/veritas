@@ -48,6 +48,9 @@ def main():
                         "e.g. --hw-xfam-allow x87 --hw-xfam-allow sse --hw-xfam-allow avx")
     parser.add_argument("--data-key", default="reference-values.json",
                         help="ConfigMap data key name (default: reference-values.json)")
+    parser.add_argument("--bot-version", default="1.2", choices=["1.1", "1.2"],
+                        help="Red Hat build of Trustee format version (default: 1.2 for OSC 1.13+). "
+                        "Use 1.1 for OSC 1.12 and earlier")
     parser.add_argument("-o", "--output", default=".",
                         help="Output directory (default: current directory)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
@@ -110,7 +113,8 @@ def main():
     skipped = getattr(extractor, "skipped_versions", None)
     rvps_path.write_text(format_trustee(values, extractor.platform, args.tee,
                                         versions=versions, skipped=skipped,
-                                        data_key=args.data_key))
+                                        data_key=args.data_key,
+                                        bot_version=args.bot_version))
     log.info("Written %s", rvps_path)
 
 
