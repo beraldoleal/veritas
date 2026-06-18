@@ -77,7 +77,8 @@ def discover_osc_versions(all_tags, osc_major_minor):
     return versions
 
 
-def run_veritas(platform, tee, authfile, output_dir, ocp_versions=None, osc_versions=None):
+def run_veritas(platform, tee, authfile, output_dir, ocp_versions=None, osc_versions=None,
+                bot_version=None):
     """Run veritas with all versions at once, producing merged output."""
     cmd = [
         sys.executable, "-m", "veritas",
@@ -86,6 +87,8 @@ def run_veritas(platform, tee, authfile, output_dir, ocp_versions=None, osc_vers
         "--authfile", str(authfile),
         "-o", str(output_dir),
     ]
+    if bot_version:
+        cmd.extend(["--bot-version", bot_version])
     for v in (ocp_versions or []):
         cmd.extend(["--ocp-version", v])
     for v in (osc_versions or []):
@@ -107,6 +110,8 @@ def main():
     parser.add_argument("--support-matrix", required=True, help="Support matrix JSON")
     parser.add_argument("--authfile", help="Registry auth file")
     parser.add_argument("--platform", choices=["baremetal", "azure"], help="Run only this platform")
+    parser.add_argument("--bot-version", choices=["1.1", "1.2"],
+                        help="Red Hat build of Trustee format version (passed to veritas)")
     parser.add_argument("--dry-run", action="store_true", help="List versions without running veritas")
     parser.add_argument("-o", "--output", help="Output directory (default: tmpdir)")
     args = parser.parse_args()
@@ -162,7 +167,8 @@ def main():
 
             versions_str = ", ".join(info["versions"])
             print(f"  {label} ({versions_str}) ... ", end="", flush=True)
-            kwargs = {"platform": platform, "tee": tee, "authfile": args.authfile, "output_dir": tee_dir}
+            kwargs = {"platform": platform, "tee": tee, "authfile": args.authfile, "output_dir": tee_dir,
+                      "bot_version": args.bot_version}
             if info["type"] == "ocp":
                 kwargs["ocp_versions"] = info["versions"]
             else:
