@@ -26,21 +26,72 @@ veritas --platform azure --tee snp \
 
 # Specific OSC operator versions (merged into one RVPS ConfigMap)
 veritas --platform azure --tee tdx \
-  --osc-version 1.11.0 \
-  --osc-version 1.11.1 \
+  --image-tag 1.11.0 \
+  --image-tag 1.11.1 \
   --authfile pull-secret.json \
   --initdata initdata.toml
+
+# Custom Rekor server (if Red Hat Rekor is unavailable)
+veritas --platform azure --tee tdx \
+  --authfile pull-secret.json \
+  --rekor-url https://rekor.sigstore.dev \
+  --rekor-pub-key-url https://rekor.sigstore.dev/api/v1/log/publicKey \
+  --initdata initdata.toml
+
+# Pre-GA builds from Konflux (git commit hash as tag)
+veritas --platform azure --tee tdx \
+  --authfile pull-secret.json \
+  --image-repo quay.io/redhat-user-workloads/ose-osc-tenant/osc-dm-verity-image \
+  --image-tag 062b4c37cde3dce50f4e2394bfee56e01cd83bc3
 ```
 
 ## Version discovery
 
 The dm-verity image is versioned by OSC operator release (e.g.
-1.11.0, 1.11.1), not by OCP version. When `--osc-version` is not
+1.11.0, 1.11.1), not by OCP version. When `--image-tag` is not
 provided, veritas defaults to `latest`.
 
 Different OSC versions may produce different PCR values (e.g.
 pcr09 and pcr12 differ between 1.11.0 and 1.11.1). Use multiple
-`--osc-version` flags to merge them into a single RVPS ConfigMap.
+`--image-tag` flags to merge them into a single RVPS ConfigMap.
+
+### Pre-GA builds
+
+Pre-GA builds are available in the Konflux registry and are tagged
+with git commit hashes instead of version numbers:
+
+```bash
+# List available pre-GA tags (commit hashes)
+skopeo list-tags docker://quay.io/redhat-user-workloads/ose-osc-tenant/osc-dm-verity-image
+
+# Use a specific commit hash
+veritas --platform azure --tee tdx \
+  --image-repo quay.io/redhat-user-workloads/ose-osc-tenant/osc-dm-verity-image \
+  --image-tag 062b4c37cde3dce50f4e2394bfee56e01cd83bc3
+```
+
+**GA vs Pre-GA:**
+- GA releases (registry.redhat.io): Use version tags like `1.12.1`
+- Pre-GA builds (quay.io): Use git commit hashes like `062b4c37...`
+
+Both work with `--image-tag`, just specify the appropriate repository
+with `--image-repo` when using pre-GA builds.
+
+## Signature verification
+
+By default, veritas uses the Red Hat Rekor instance for signature
+verification:
+
+- Rekor server: `https://rekor-server-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com`
+- Public key: obtained via Rekor API `/api/v1/log/publicKey`
+
+If you need to use a different Rekor instance (e.g., public Sigstore):
+
+```bash
+veritas --platform azure --tee tdx \
+  --rekor-url https://rekor.sigstore.dev \
+  --rekor-pub-key-url https://rekor.sigstore.dev/api/v1/log/publicKey
+```
 
 ## Output example
 
