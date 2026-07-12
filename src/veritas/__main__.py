@@ -20,8 +20,13 @@ def main():
     parser.add_argument("--authfile", help="Registry auth file for pulling images")
     parser.add_argument("--ocp-version", action="append", dest="ocp_versions",
                         help="OCP version (repeatable, e.g. --ocp-version 4.20.6 --ocp-version 4.20.15)")
-    parser.add_argument("--osc-version", action="append", dest="osc_versions",
-                        help="OSC dm-verity image tag (azure only, repeatable). Defaults to latest")
+    parser.add_argument("--image-tag", action="append", dest="image_tags",
+                        help="Image tag (azure only, repeatable). Can be a version (e.g. 1.12.1) "
+                        "or git commit hash (e.g. 062b4c37...). Defaults to latest")
+    parser.add_argument("--image-repo",
+                        help="Container image repository (azure only). "
+                        "Default: registry.redhat.io/openshift-sandboxed-containers/osc-dm-verity-image. "
+                        "For pre-GA builds use: quay.io/redhat-user-workloads/ose-osc-tenant/osc-dm-verity-image")
     parser.add_argument("--kernel-cmdline",
                         help="Override kernel command line (baremetal only). "
                         "When set, computes a single measurement value instead of "
@@ -46,6 +51,10 @@ def main():
     parser.add_argument("--hw-xfam-allow", action="append", dest="hw_xfam_allow",
                         help="XFAM CPU feature enabled for the TD (TDX only, repeatable). "
                         "e.g. --hw-xfam-allow x87 --hw-xfam-allow sse --hw-xfam-allow avx")
+    parser.add_argument("--rekor-url",
+                        help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
+    parser.add_argument("--rekor-pub-key-url",
+                        help="Rekor public key URL for signature verification (default: Red Hat TUF server)")
     parser.add_argument("--data-key", default="reference-values.json",
                         help="ConfigMap data key name (default: reference-values.json)")
     parser.add_argument("--bot-version", default="1.2", choices=["1.1", "1.2"],
@@ -64,16 +73,23 @@ def main():
     try:
         extractor_cls = EXTRACTORS[args.platform]
         kwargs = {"tee": args.tee, "authfile": args.authfile}
-        if args.ocp_versions:
-            kwargs["ocp_versions"] = args.ocp_versions
-        if args.osc_versions:
-            kwargs["osc_versions"] = args.osc_versions
         if args.platform == "baremetal":
+            if args.ocp_versions:
+                kwargs["ocp_versions"] = args.ocp_versions
             kwargs["kernel_cmdline"] = args.kernel_cmdline
             kwargs["max_cpu_count"] = args.max_cpu_count
             kwargs["mem_size"] = args.mem_size * 1024 * 1024
             kwargs["kata_rpm"] = args.kata_rpm
             kwargs["gpu"] = args.gpu
+        else:  # azure
+            if args.image_tags:
+                kwargs["image_tags"] = args.image_tags
+            if args.rekor_url:
+                kwargs["rekor_url"] = args.rekor_url
+            if args.rekor_pub_key_url:
+                kwargs["rekor_pub_key_url"] = args.rekor_pub_key_url
+            if args.image_repo:
+                kwargs["image_repo"] = args.image_repo
         extractor = extractor_cls(**kwargs)
         values = extractor.extract()
         if args.initdata_paths:
@@ -109,7 +125,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rvps_path = output_dir / RVPS_FILENAME
-    versions = args.ocp_versions or args.osc_versions
+    versions = args.ocp_versions or args.image_tags
     skipped = getattr(extractor, "skipped_versions", None)
     rvps_path.write_text(format_trustee(values, extractor.platform, args.tee,
                                         versions=versions, skipped=skipped,

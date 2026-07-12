@@ -11,13 +11,15 @@ class ContainerImage:
     """Pull and extract files from a container image."""
 
     COSIGN_PUB_KEY_URL = "https://security.access.redhat.com/data/63405576.txt"
-    REKOR_PUB_KEY_URL = "https://tuf-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com/targets/rekor.pub"
-    REKOR_URL = "https://rekor-server-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com"
+    DEFAULT_REKOR_URL = "https://rekor-server-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com"
+    DEFAULT_REKOR_PUB_KEY_URL = "https://rekor-server-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com/api/v1/log/publicKey"
 
-    def __init__(self, repository, tag="latest", authfile=None):
+    def __init__(self, repository, tag="latest", authfile=None, rekor_url=None, rekor_pub_key_url=None):
         self.repository = repository
         self.tag = tag
         self.authfile = authfile
+        self.rekor_url = rekor_url or self.DEFAULT_REKOR_URL
+        self.rekor_pub_key_url = rekor_pub_key_url or self.DEFAULT_REKOR_PUB_KEY_URL
         self._pulled = {}  # image_ref -> (TemporaryDirectory, img_dir Path)
 
     @property
@@ -43,11 +45,11 @@ class ContainerImage:
             cosign_key = Path(tmpdir) / "cosign-pub-key.pem"
             rekor_key = Path(tmpdir) / "rekor.pub"
             self._run(["curl", "-sL", self.COSIGN_PUB_KEY_URL, "-o", str(cosign_key)])
-            self._run(["curl", "-sL", self.REKOR_PUB_KEY_URL, "-o", str(rekor_key)])
+            self._run(["curl", "-sL", self.rekor_pub_key_url, "-o", str(rekor_key)])
             self._run([
                 "cosign", "verify",
                 "--key", str(cosign_key),
-                "--rekor-url", self.REKOR_URL,
+                "--rekor-url", self.rekor_url,
                 image_ref,
             ], env={"SIGSTORE_REKOR_PUBLIC_KEY": str(rekor_key)})
 
@@ -124,7 +126,11 @@ class ContainerImage:
 
         layer_file, entry_name = last_found
         with tarfile.open(str(layer_file), "r:*") as tf:
-            with tf.extractfile(tf.getmember(entry_name)) as src:
+            member = tf.getmember(entry_name)
+            src = tf.extractfile(member)
+            if src is None:
+                raise RuntimeError(f"Failed to extract {container_path} from layer")
+            with src:
                 Path(dest_path).write_bytes(src.read())
 
     def _auth_args(self):
