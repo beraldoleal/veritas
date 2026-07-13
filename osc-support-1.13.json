@@ -1,0 +1,13 @@
+{
+  "osc_version": "1.13",
+  "source": "OSC 1.13 support matrix (internal)",
+  "retrieved": "2026-07-13",
+  "platforms": {
+    "baremetal": {
+      "min_z": ["4.19.38", "4.20.29", "4.21.24", "4.22.5"]
+    },
+    "azure": {
+      "min_z": ["4.19.38", "4.20.29", "4.21.24", "4.22.5"]
+    }
+  }
+}
