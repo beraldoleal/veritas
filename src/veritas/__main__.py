@@ -55,8 +55,10 @@ def main():
                         help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
     parser.add_argument("--rekor-pub-key-url",
                         help="Rekor public key URL for signature verification (default: Red Hat TUF server)")
-    parser.add_argument("--data-key", default="reference-values.json",
-                        help="ConfigMap data key name (default: reference-values.json)")
+    parser.add_argument("--data-key", default="reference_value",
+                        help="ConfigMap data key name (default: reference_value)")
+    parser.add_argument("--cm-name", default="trusteeconfig-rvps-reference-values",
+                        help="ConfigMap metadata.name (default: trusteeconfig-rvps-reference-values)")
     parser.add_argument("--bot-version", default="1.2", choices=["1.1", "1.2"],
                         help="Red Hat build of Trustee format version (default: 1.2 for OSC 1.13+). "
                         "Use 1.1 for OSC 1.12 and earlier")
@@ -130,6 +132,7 @@ def main():
     rvps_path.write_text(format_trustee(values, extractor.platform, args.tee,
                                         versions=versions, skipped=skipped,
                                         data_key=args.data_key,
+                                        cm_name=args.cm_name,
                                         bot_version=args.bot_version))
     log.info("Written %s", rvps_path)
 

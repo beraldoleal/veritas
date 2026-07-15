@@ -156,10 +156,10 @@ initrd placement address.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rvps-reference-values
+  name: trusteeconfig-rvps-reference-values
   namespace: trustee-operator-system
 data:
-  reference-values: |
+  reference_value: |
     [
       {
         "name": "tdvfkernel",
