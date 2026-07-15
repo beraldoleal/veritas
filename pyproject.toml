@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "veritas"
-version = "0.1.1"
+version = "0.1.2"
 description = "Reference value extraction for CoCo attestation"
 authors = [{name = "Beraldo Leal", email = "bleal@redhat.com"}]
 requires-python = ">=3.11"
