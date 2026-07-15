@@ -111,7 +111,7 @@ class AzureExtractor(PlatformExtractor):
                 continue
             values.append(ReferenceValue(
                 name=self._rvps_key(name),
-                values=[raw_value.lstrip("0x")],
+                values=[raw_value.removeprefix("0x")],
                 category="executables",
                 description=description,
                 algorithm="sha256",
