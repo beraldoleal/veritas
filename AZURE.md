@@ -100,10 +100,10 @@ veritas --platform azure --tee tdx \
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rvps-reference-values
+  name: trusteeconfig-rvps-reference-values
   namespace: trustee-operator-system
 data:
-  reference-values: |
+  reference_value: |
     [
       {
         "name": "tdx_pcr03",

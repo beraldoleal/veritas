@@ -24,7 +24,8 @@ class ReferenceValue:
 def format_trustee(values: list[ReferenceValue], platform: str, tee: str,
                    versions: list[str] | None = None,
                    skipped: list[str] | None = None,
-                   data_key: str = "reference-values.json",
+                   data_key: str = "reference_value",
+                   cm_name: str = "trusteeconfig-rvps-reference-values",
                    bot_version: str = "1.2") -> str:
     """Format values as a Trustee RVPS ConfigMap YAML.
 
@@ -63,7 +64,7 @@ def format_trustee(values: list[ReferenceValue], platform: str, tee: str,
         f"apiVersion: v1\n"
         f"kind: ConfigMap\n"
         f"metadata:\n"
-        f"  name: rvps-reference-values\n"
+        f"  name: {cm_name}\n"
         f"  namespace: {RVPS_NAMESPACE}\n"
         f"data:\n"
         f"  {data_key}: |\n"
