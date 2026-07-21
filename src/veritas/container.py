@@ -11,8 +11,8 @@ class ContainerImage:
     """Pull and extract files from a container image."""
 
     COSIGN_PUB_KEY_URL = "https://security.access.redhat.com/data/63405576.txt"
-    DEFAULT_REKOR_URL = "https://rekor-server-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com"
-    DEFAULT_REKOR_PUB_KEY_URL = "https://rekor-server-default.apps.rosa.rekor-prod.2jng.p3.openshiftapps.com/api/v1/log/publicKey"
+    DEFAULT_REKOR_URL = "https://rekor-server-sigstore-rekor-prod.apps.rosa.appsrep11ue1.tgem.p3.openshiftapps.com"
+    DEFAULT_REKOR_PUB_KEY_URL = "https://rekor-server-sigstore-rekor-prod.apps.rosa.appsrep11ue1.tgem.p3.openshiftapps.com/api/v1/log/publicKey"
 
     def __init__(self, repository, tag="latest", authfile=None, rekor_url=None, rekor_pub_key_url=None):
         self.repository = repository
