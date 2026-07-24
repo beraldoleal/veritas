@@ -8,6 +8,7 @@ from pathlib import Path
 from veritas.container import ContainerImage
 from veritas.models import ReferenceValue
 from veritas.platforms.base import PlatformExtractor
+from veritas.platforms.utils import remap_registry
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +38,8 @@ class AzureExtractor(PlatformExtractor):
     }
 
     def __init__(self, tee, authfile=None, image_tags=None, rekor_url=None,
-                 rekor_pub_key_url=None, image_repo=None, cosign_pub_key=None, skip_tlog=False):
+                 rekor_pub_key_url=None, image_repo=None, cosign_pub_key=None,
+                 skip_tlog=False, mirror_registry=None):
         if tee not in self.EVIDENCE_TYPES:
             raise ValueError(f"Unknown TEE: {tee}. Must be one of {list(self.EVIDENCE_TYPES)}")
         self.tee = tee
@@ -45,7 +47,7 @@ class AzureExtractor(PlatformExtractor):
         self.image_tags = image_tags or ["latest"]
         self.rekor_url = rekor_url
         self.rekor_pub_key_url = rekor_pub_key_url
-        self.image_repo = image_repo or self.DEFAULT_IMAGE_REPO
+        self.image_repo = image_repo or remap_registry(self.DEFAULT_IMAGE_REPO, mirror_registry)
         self.cosign_pub_key = cosign_pub_key
         self.skip_tlog = skip_tlog
 

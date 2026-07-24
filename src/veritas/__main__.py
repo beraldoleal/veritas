@@ -24,9 +24,8 @@ def main():
                         help="Image tag (azure only, repeatable). Can be a version (e.g. 1.12.1) "
                         "or git commit hash (e.g. 062b4c37...). Defaults to latest")
     parser.add_argument("--image-repo",
-                        help="Container image repository (azure only). "
-                        "Default: registry.redhat.io/openshift-sandboxed-containers/osc-dm-verity-image. "
-                        "For pre-GA builds use: quay.io/redhat-user-workloads/ose-osc-tenant/osc-dm-verity-image")
+                        help="[Deprecated] Use --mirror-registry instead. "
+                        "Full image repository override for the azure dm-verity image.")
     parser.add_argument("--kernel-cmdline",
                         help="Override kernel command line (baremetal only). "
                         "When set, computes a single measurement value instead of "
@@ -52,6 +51,12 @@ def main():
                         help="XFAM CPU feature enabled for the TD (TDX only, repeatable). "
                         "e.g. --hw-xfam-allow x87 --hw-xfam-allow sse --hw-xfam-allow avx")
     disconnected = parser.add_argument_group("Disconnected environments")
+    disconnected.add_argument("--mirror-registry",
+                              help="Registry mirror host to use in place of public registries. "
+                              "Assumes the mirror preserves the original image path structure, "
+                              "as produced by oc-mirror. Used for the dm-verity image (azure) "
+                              "and the OCP release payload and extensions image (baremetal). "
+                              "Example: my-acr.azurecr.io")
     disconnected.add_argument("--cosign-pub-key",
                               help="Path to a local cosign public key PEM file. When set, skips the "
                               "download of the Red Hat cosign key from security.access.redhat.com. "
@@ -85,6 +90,8 @@ def main():
     try:
         extractor_cls = EXTRACTORS[args.platform]
         kwargs = {"tee": args.tee, "authfile": args.authfile}
+        if args.mirror_registry:
+            kwargs["mirror_registry"] = args.mirror_registry
         if args.platform == "baremetal":
             if args.ocp_versions:
                 kwargs["ocp_versions"] = args.ocp_versions
@@ -101,6 +108,7 @@ def main():
             if args.rekor_pub_key_url:
                 kwargs["rekor_pub_key_url"] = args.rekor_pub_key_url
             if args.image_repo:
+                log.warning("--image-repo is deprecated, use --mirror-registry instead.")
                 kwargs["image_repo"] = args.image_repo
             if args.cosign_pub_key:
                 kwargs["cosign_pub_key"] = args.cosign_pub_key
