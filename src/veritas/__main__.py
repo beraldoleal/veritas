@@ -56,6 +56,11 @@ def main():
                               help="Path to a local cosign public key PEM file. When set, skips the "
                               "download of the Red Hat cosign key from security.access.redhat.com. "
                               "Required in disconnected environments.")
+    disconnected.add_argument("--skip-tlog", action="store_true",
+                              help="Skip transparency log (Rekor) verification when verifying "
+                              "image signatures. Use in disconnected environments where Rekor "
+                              "is not accessible. The cosign signature is still verified "
+                              "against the public key.")
     disconnected.add_argument("--rekor-url",
                               help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
     disconnected.add_argument("--rekor-pub-key-url",
@@ -99,6 +104,8 @@ def main():
                 kwargs["image_repo"] = args.image_repo
             if args.cosign_pub_key:
                 kwargs["cosign_pub_key"] = args.cosign_pub_key
+            if args.skip_tlog:
+                kwargs["skip_tlog"] = args.skip_tlog
         extractor = extractor_cls(**kwargs)
         values = extractor.extract()
         if args.initdata_paths:

@@ -15,13 +15,14 @@ class ContainerImage:
     DEFAULT_REKOR_PUB_KEY_URL = "https://rekor-server-sigstore-rekor-prod.apps.rosa.appsrep11ue1.tgem.p3.openshiftapps.com/api/v1/log/publicKey"
 
     def __init__(self, repository, tag="latest", authfile=None, rekor_url=None,
-                 rekor_pub_key_url=None, cosign_pub_key=None):
+                 rekor_pub_key_url=None, cosign_pub_key=None, skip_tlog=False):
         self.repository = repository
         self.tag = tag
         self.authfile = authfile
         self.rekor_url = rekor_url or self.DEFAULT_REKOR_URL
         self.rekor_pub_key_url = rekor_pub_key_url or self.DEFAULT_REKOR_PUB_KEY_URL
         self.cosign_pub_key = cosign_pub_key
+        self.skip_tlog = skip_tlog
         self._pulled = {}  # image_ref -> (TemporaryDirectory, img_dir Path)
 
     @property
@@ -49,14 +50,17 @@ class ContainerImage:
             else:
                 cosign_key = Path(tmpdir) / "cosign-pub-key.pem"
                 self._run(["curl", "-sL", self.COSIGN_PUB_KEY_URL, "-o", str(cosign_key)])
-            rekor_key = Path(tmpdir) / "rekor.pub"
-            self._run(["curl", "-sL", self.rekor_pub_key_url, "-o", str(rekor_key)])
-            self._run([
-                "cosign", "verify",
-                "--key", str(cosign_key),
-                "--rekor-url", self.rekor_url,
-                image_ref,
-            ], env={"SIGSTORE_REKOR_PUBLIC_KEY": str(rekor_key)})
+            cmd = ["cosign", "verify", "--key", str(cosign_key)]
+            env = {}
+            if self.skip_tlog:
+                cmd.append("--insecure-ignore-tlog")
+            else:
+                rekor_key = Path(tmpdir) / "rekor.pub"
+                self._run(["curl", "-sL", self.rekor_pub_key_url, "-o", str(rekor_key)])
+                cmd.extend(["--rekor-url", self.rekor_url])
+                env["SIGSTORE_REKOR_PUBLIC_KEY"] = str(rekor_key)
+            cmd.append(image_ref)
+            self._run(cmd, env=env or None)
 
     def pull(self, image_ref):
         """Pull the image locally using skopeo copy."""
