@@ -31,7 +31,7 @@ them ready for Trustee.
 
 - `oc`: resolves and extracts the rhel-coreos-extensions image from the OCP release
 - `skopeo`: queries the registry for image digests
-- `cosign`: verifies Red Hat image signatures (Azure only)
+- `cosign` >= 2.0: verifies Red Hat image signatures (Azure only)
 - `tdx-measure`: computes TDX runtime measurement registers (Baremetal TDX only, `cargo install --git https://github.com/virtee/tdx-measure tdx-measure-cli`)
 
 ## Install
@@ -179,6 +179,12 @@ Veritas does not output them.
 |---|---|
 | 🔒 SEAM module (mr_seam) | Redundant with tcb_status. TDX module hash is published by [Intel](https://github.com/intel/confidential-computing.tdx.tdx-module/releases) but impractical to discover from the BIOS vendor. |
 | 🔒 TCB SVN (tcb_svn) | Already implicitly checked by the DCAP verifier as part of tcb_status. |
+
+## Disconnected environments
+
+See [DISCONNECTED.md](DISCONNECTED.md) for guidance on running veritas
+in air-gapped environments, including registry mirrors and signature
+verification options.
 
 ## Known limitations
 
