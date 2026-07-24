@@ -51,10 +51,15 @@ def main():
     parser.add_argument("--hw-xfam-allow", action="append", dest="hw_xfam_allow",
                         help="XFAM CPU feature enabled for the TD (TDX only, repeatable). "
                         "e.g. --hw-xfam-allow x87 --hw-xfam-allow sse --hw-xfam-allow avx")
-    parser.add_argument("--rekor-url",
-                        help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
-    parser.add_argument("--rekor-pub-key-url",
-                        help="Rekor public key URL for signature verification (default: Red Hat TUF server)")
+    disconnected = parser.add_argument_group("Disconnected environments")
+    disconnected.add_argument("--cosign-pub-key",
+                              help="Path to a local cosign public key PEM file. When set, skips the "
+                              "download of the Red Hat cosign key from security.access.redhat.com. "
+                              "Required in disconnected environments.")
+    disconnected.add_argument("--rekor-url",
+                              help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
+    disconnected.add_argument("--rekor-pub-key-url",
+                              help="Rekor public key URL for signature verification (default: Red Hat TUF server)")
     parser.add_argument("--data-key", default="reference_value",
                         help="ConfigMap data key name (default: reference_value)")
     parser.add_argument("--cm-name", default="trusteeconfig-rvps-reference-values",
@@ -92,6 +97,8 @@ def main():
                 kwargs["rekor_pub_key_url"] = args.rekor_pub_key_url
             if args.image_repo:
                 kwargs["image_repo"] = args.image_repo
+            if args.cosign_pub_key:
+                kwargs["cosign_pub_key"] = args.cosign_pub_key
         extractor = extractor_cls(**kwargs)
         values = extractor.extract()
         if args.initdata_paths:

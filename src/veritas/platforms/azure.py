@@ -36,7 +36,8 @@ class AzureExtractor(PlatformExtractor):
         "snp": "az_snp_vtpm",
     }
 
-    def __init__(self, tee, authfile=None, image_tags=None, rekor_url=None, rekor_pub_key_url=None, image_repo=None):
+    def __init__(self, tee, authfile=None, image_tags=None, rekor_url=None,
+                 rekor_pub_key_url=None, image_repo=None, cosign_pub_key=None):
         if tee not in self.EVIDENCE_TYPES:
             raise ValueError(f"Unknown TEE: {tee}. Must be one of {list(self.EVIDENCE_TYPES)}")
         self.tee = tee
@@ -45,6 +46,7 @@ class AzureExtractor(PlatformExtractor):
         self.rekor_url = rekor_url
         self.rekor_pub_key_url = rekor_pub_key_url
         self.image_repo = image_repo or self.DEFAULT_IMAGE_REPO
+        self.cosign_pub_key = cosign_pub_key
 
     @property
     def platform(self) -> str:
@@ -60,7 +62,8 @@ class AzureExtractor(PlatformExtractor):
         for tag in self.image_tags:
             log.info("Processing image tag %s", tag)
             image = ContainerImage(self.image_repo, tag=tag, authfile=self.authfile,
-                                 rekor_url=self.rekor_url, rekor_pub_key_url=self.rekor_pub_key_url)
+                                   rekor_url=self.rekor_url, rekor_pub_key_url=self.rekor_pub_key_url,
+                                   cosign_pub_key=self.cosign_pub_key)
             image_ref = image.get_pinned_reference()
             log.info("Image: %s", image_ref)
             log.info("Verifying image signature...")

@@ -14,12 +14,14 @@ class ContainerImage:
     DEFAULT_REKOR_URL = "https://rekor-server-sigstore-rekor-prod.apps.rosa.appsrep11ue1.tgem.p3.openshiftapps.com"
     DEFAULT_REKOR_PUB_KEY_URL = "https://rekor-server-sigstore-rekor-prod.apps.rosa.appsrep11ue1.tgem.p3.openshiftapps.com/api/v1/log/publicKey"
 
-    def __init__(self, repository, tag="latest", authfile=None, rekor_url=None, rekor_pub_key_url=None):
+    def __init__(self, repository, tag="latest", authfile=None, rekor_url=None,
+                 rekor_pub_key_url=None, cosign_pub_key=None):
         self.repository = repository
         self.tag = tag
         self.authfile = authfile
         self.rekor_url = rekor_url or self.DEFAULT_REKOR_URL
         self.rekor_pub_key_url = rekor_pub_key_url or self.DEFAULT_REKOR_PUB_KEY_URL
+        self.cosign_pub_key = cosign_pub_key
         self._pulled = {}  # image_ref -> (TemporaryDirectory, img_dir Path)
 
     @property
@@ -42,9 +44,12 @@ class ContainerImage:
     def verify(self, image_ref):
         """Verify the image signature with Cosign and Rekor."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            cosign_key = Path(tmpdir) / "cosign-pub-key.pem"
+            if self.cosign_pub_key:
+                cosign_key = Path(self.cosign_pub_key)
+            else:
+                cosign_key = Path(tmpdir) / "cosign-pub-key.pem"
+                self._run(["curl", "-sL", self.COSIGN_PUB_KEY_URL, "-o", str(cosign_key)])
             rekor_key = Path(tmpdir) / "rekor.pub"
-            self._run(["curl", "-sL", self.COSIGN_PUB_KEY_URL, "-o", str(cosign_key)])
             self._run(["curl", "-sL", self.rekor_pub_key_url, "-o", str(rekor_key)])
             self._run([
                 "cosign", "verify",
