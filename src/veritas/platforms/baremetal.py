@@ -144,18 +144,29 @@ class BaremetalExtractor(PlatformExtractor):
         return list(merged.values())
 
     def compute_initdata(self, initdata_paths: list[str]) -> ReferenceValue:
-        """Compute initdata hash for baremetal (sha384)."""
+        """Compute initdata hash using the algorithm declared in the initdata.toml header."""
+        import tomllib
         digests = []
+        algo = None
         for p in initdata_paths:
             content = Path(p).read_bytes()
-            digests.append(hashlib.sha384(content).hexdigest())
+            try:
+                file_algo = tomllib.loads(content.decode()).get("algorithm", "sha384").lower()
+            except Exception:
+                file_algo = "sha384"
+                log.warning("Could not parse algorithm from %s, defaulting to sha384", p)
+            if algo is not None and file_algo != algo:
+                log.warning("Mixed algorithms across initdata files (%s vs %s), using %s",
+                            algo, file_algo, file_algo)
+            algo = file_algo
+            digests.append(hashlib.new(algo, content).hexdigest())
         sources = ", ".join(Path(p).name for p in initdata_paths)
         return ReferenceValue(
             name="init_data",
             values=digests,
             category="configuration",
             description="Init data hash",
-            algorithm="sha384",
+            algorithm=algo,
             source=f"computed from {sources}",
         )
 
