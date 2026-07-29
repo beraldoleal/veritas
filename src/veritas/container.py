@@ -34,6 +34,14 @@ class ContainerImage:
         out = self._run(cmd)
         return json.loads(out)["Digest"]
 
+    def get_annotations(self, image_ref):
+        """Return OCI annotations from the image manifest without pulling it."""
+        cmd = ["skopeo", "inspect", "--raw", f"docker://{image_ref}"]
+        cmd.extend(self._auth_args())
+        out = self._run(cmd)
+        manifest = json.loads(out)
+        return manifest.get("annotations", {})
+
     def get_pinned_reference(self):
         """Return a digest-pinned image reference."""
         digest = self.get_digest()

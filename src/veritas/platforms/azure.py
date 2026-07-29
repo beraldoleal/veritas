@@ -54,8 +54,14 @@ class AzureExtractor(PlatformExtractor):
     def evidence_type(self) -> str:
         return self.EVIDENCE_TYPES[self.tee]
 
+    ANNOTATION_BASE = "io.github.confidential-containers.measurements"
+
     def extract(self) -> list[ReferenceValue]:
-        """Verify, pull dm-verity image(s), and parse measurements.json."""
+        """Verify, pull dm-verity image(s), and parse measurements.
+
+        Tries OCI annotations first (no image pull required).
+        Falls back to extracting the embedded measurements.json.
+        """
         merged = {}
         for tag in self.image_tags:
             log.info("Processing image tag %s", tag)
@@ -66,9 +72,14 @@ class AzureExtractor(PlatformExtractor):
             log.info("Verifying image signature...")
             image.verify(image_ref)
             log.info("Signature verified.")
-            image.pull(image_ref)
-            raw = image.extract_file(image_ref, self.MEASUREMENTS_PATH)
-            values = self._parse_measurements(json.loads(raw))
+            values = self._measurements_from_annotations(image, image_ref)
+            if values is None:
+                log.info("No OCI annotations found, falling back to image pull.")
+                image.pull(image_ref)
+                raw = image.extract_file(image_ref, self.MEASUREMENTS_PATH)
+                values = self._parse_measurements(json.loads(raw))
+            else:
+                log.info("Measurements loaded from OCI annotations.")
 
             for v in values:
                 if v.name in merged:
@@ -100,6 +111,34 @@ class AzureExtractor(PlatformExtractor):
     def _rvps_key(self, pcr_name: str) -> str:
         """Convert pcr name to RVPS key: pcr03 -> snp_pcr03 or tdx_pcr03."""
         return f"{self.tee}_{pcr_name}"
+
+    def _measurements_from_annotations(self, image: ContainerImage, image_ref: str) -> list[ReferenceValue] | None:
+        """Extract measurements from OCI annotations without pulling the image.
+
+        Expects annotations keyed as:
+            io.github.confidential-containers.measurements.algorithm = sha256
+            io.github.confidential-containers.measurements.pcr03 = 0x...
+            io.github.confidential-containers.measurements.pcr09 = 0x...
+            ...
+
+        Returns None if no matching annotations are present.
+        """
+        try:
+            annotations = image.get_annotations(image_ref)
+        except RuntimeError:
+            return None
+
+        base = self.ANNOTATION_BASE + "."
+        alg = annotations.get(base + "algorithm", "sha256")
+        pcr_data = {
+            k[len(base):]: v
+            for k, v in annotations.items()
+            if k.startswith(base + "pcr")
+        }
+        if not pcr_data:
+            return None
+
+        return self._parse_measurements({"measurements": {alg: pcr_data}})
 
     def _parse_measurements(self, measurements: dict) -> list[ReferenceValue]:
         """Convert measurements.json to ReferenceValues."""
