@@ -12,6 +12,7 @@ from veritas.vendor.td_payload_qemu_hash import compute_kernel_hash
 from veritas.vendor.td_shim_tee_info_hash import compute_mrtd
 from veritas.models import ReferenceValue
 from veritas.platforms.base import PlatformExtractor
+from veritas.platforms.utils import remap_registry
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class BaremetalExtractor(PlatformExtractor):
 
     def __init__(self, tee, authfile=None, ocp_versions=None,
                  kernel_cmdline=None, max_cpu_count=32, mem_size=0x80000000,
-                 kata_rpm=None, gpu=False):
+                 kata_rpm=None, gpu=False, mirror_registry=None):
         if tee not in self.EVIDENCE_TYPES:
             raise ValueError(f"Unknown TEE: {tee}. Must be one of {list(self.EVIDENCE_TYPES)}")
         if not ocp_versions:
@@ -69,6 +70,8 @@ class BaremetalExtractor(PlatformExtractor):
         self.mem_size = mem_size
         self.kata_rpm = Path(kata_rpm) if kata_rpm else None
         self.gpu = gpu
+        self.ocp_release_repo = remap_registry(self.OCP_RELEASE_REPO, mirror_registry)
+        self.mirror_registry = mirror_registry
         if self.kata_rpm and not self.kata_rpm.exists():
             raise ValueError(f"Kata RPM not found: {self.kata_rpm}")
 
@@ -172,7 +175,7 @@ class BaremetalExtractor(PlatformExtractor):
 
     def _verify_release(self, ocp_version: str):
         """Verify the OCP release payload integrity."""
-        release_image = f"{self.OCP_RELEASE_REPO}:{ocp_version}-x86_64"
+        release_image = f"{self.ocp_release_repo}:{ocp_version}-x86_64"
         cmd = ["oc", "adm", "release", "info", "--verify", release_image]
         if self.authfile:
             cmd.extend(["-a", self.authfile])
@@ -184,7 +187,7 @@ class BaremetalExtractor(PlatformExtractor):
 
     def _get_extensions_image(self, ocp_version: str) -> str:
         """Get rhel-coreos-extensions image ref from the OCP release."""
-        release_image = f"{self.OCP_RELEASE_REPO}:{ocp_version}-x86_64"
+        release_image = f"{self.ocp_release_repo}:{ocp_version}-x86_64"
         cmd = [
             "oc", "adm", "release", "info",
             "--image-for=rhel-coreos-extensions",
@@ -195,7 +198,7 @@ class BaremetalExtractor(PlatformExtractor):
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to get extensions image for OCP {ocp_version}:\n{result.stderr}")
-        return result.stdout.strip()
+        return remap_registry(result.stdout.strip(), self.mirror_registry)
 
     def _extract_extensions(self, image_ref, dest_dir):
         """Extract the RPM extensions directory from the image using oc."""

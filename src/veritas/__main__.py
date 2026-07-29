@@ -24,9 +24,8 @@ def main():
                         help="Image tag (azure only, repeatable). Can be a version (e.g. 1.12.1) "
                         "or git commit hash (e.g. 062b4c37...). Defaults to latest")
     parser.add_argument("--image-repo",
-                        help="Container image repository (azure only). "
-                        "Default: registry.redhat.io/openshift-sandboxed-containers/osc-dm-verity-image. "
-                        "For pre-GA builds use: quay.io/redhat-user-workloads/ose-osc-tenant/osc-dm-verity-image")
+                        help="[Deprecated] Use --mirror-registry instead. "
+                        "Full image repository override for the azure dm-verity image.")
     parser.add_argument("--kernel-cmdline",
                         help="Override kernel command line (baremetal only). "
                         "When set, computes a single measurement value instead of "
@@ -51,10 +50,26 @@ def main():
     parser.add_argument("--hw-xfam-allow", action="append", dest="hw_xfam_allow",
                         help="XFAM CPU feature enabled for the TD (TDX only, repeatable). "
                         "e.g. --hw-xfam-allow x87 --hw-xfam-allow sse --hw-xfam-allow avx")
-    parser.add_argument("--rekor-url",
-                        help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
-    parser.add_argument("--rekor-pub-key-url",
-                        help="Rekor public key URL for signature verification (default: Red Hat TUF server)")
+    disconnected = parser.add_argument_group("Disconnected environments")
+    disconnected.add_argument("--mirror-registry",
+                              help="Registry mirror host to use in place of public registries. "
+                              "Assumes the mirror preserves the original image path structure, "
+                              "as produced by oc-mirror. Used for the dm-verity image (azure) "
+                              "and the OCP release payload and extensions image (baremetal). "
+                              "Example: my-acr.azurecr.io")
+    disconnected.add_argument("--cosign-pub-key",
+                              help="Path to a local cosign public key PEM file. When set, skips the "
+                              "download of the Red Hat cosign key from security.access.redhat.com. "
+                              "Required in disconnected environments.")
+    disconnected.add_argument("--skip-tlog", action="store_true",
+                              help="Skip transparency log (Rekor) verification when verifying "
+                              "image signatures. Use in disconnected environments where Rekor "
+                              "is not accessible. The cosign signature is still verified "
+                              "against the public key.")
+    disconnected.add_argument("--rekor-url",
+                              help="Rekor server URL for signature verification (default: Red Hat Rekor instance)")
+    disconnected.add_argument("--rekor-pub-key-url",
+                              help="Rekor public key URL for signature verification (default: Red Hat TUF server)")
     parser.add_argument("--data-key", default="reference_value",
                         help="ConfigMap data key name (default: reference_value)")
     parser.add_argument("--cm-name", default="trusteeconfig-rvps-reference-values",
@@ -75,6 +90,8 @@ def main():
     try:
         extractor_cls = EXTRACTORS[args.platform]
         kwargs = {"tee": args.tee, "authfile": args.authfile}
+        if args.mirror_registry:
+            kwargs["mirror_registry"] = args.mirror_registry
         if args.platform == "baremetal":
             if args.ocp_versions:
                 kwargs["ocp_versions"] = args.ocp_versions
@@ -91,7 +108,12 @@ def main():
             if args.rekor_pub_key_url:
                 kwargs["rekor_pub_key_url"] = args.rekor_pub_key_url
             if args.image_repo:
+                log.warning("--image-repo is deprecated, use --mirror-registry instead.")
                 kwargs["image_repo"] = args.image_repo
+            if args.cosign_pub_key:
+                kwargs["cosign_pub_key"] = args.cosign_pub_key
+            if args.skip_tlog:
+                kwargs["skip_tlog"] = args.skip_tlog
         extractor = extractor_cls(**kwargs)
         values = extractor.extract()
         if args.initdata_paths:
