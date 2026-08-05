@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "osc-veritas"
-version = "0.1.2"
+dynamic = ["version"]
 description = "Reference value extraction for CoCo attestation"
 authors = [{name = "Beraldo Leal", email = "bleal@redhat.com"}]
 requires-python = ">=3.11"
@@ -22,3 +22,5 @@ junit_family = "xunit1"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
