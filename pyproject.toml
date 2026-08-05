@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "veritas"
+name = "osc-veritas"
 version = "0.1.2"
 description = "Reference value extraction for CoCo attestation"
 authors = [{name = "Beraldo Leal", email = "bleal@redhat.com"}]
