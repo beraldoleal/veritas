@@ -11,7 +11,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-from veritas.collaterals import snp
+from veritas.collaterals import snp, tdx
 from veritas.models import RVPS_NAMESPACE
 
 log = logging.getLogger(__name__)
@@ -125,12 +125,12 @@ def merge_cert_cache(kbsconfig: dict | None, new: list[dict]) -> list[dict]:
 
 def format_secrets(files: dict, namespace: str) -> str:
     docs = []
-    for hwid, data in files.items():
+    for name, data in files.items():
         docs.append(
             f"apiVersion: v1\n"
             f"kind: Secret\n"
             f"metadata:\n"
-            f"  name: {snp.secret_name(hwid)}\n"
+            f"  name: {name}\n"
             f"  namespace: {namespace}\n"
             f"type: Opaque\n"
             f"data:\n"
@@ -148,9 +148,9 @@ def format_patch(entries: list[dict]) -> str:
 
 def write_bundle(path: str, files: dict):
     with tarfile.open(path, "w") as tar:
-        for hwid, data in files.items():
+        for secret, data in files.items():
             for name, content in data.items():
-                info = tarfile.TarInfo(f"vcek/{hwid}/{name}")
+                info = tarfile.TarInfo(f"{secret}/{name}")
                 info.size = len(content)
                 tar.addfile(info, io.BytesIO(content))
 
@@ -189,7 +189,7 @@ def verify(request: str, manifests: str) -> bool:
         if node.get("tee") == "snp":
             node_ok, msg = snp.check(node, secrets, mounts)
         else:
-            node_ok, msg = True, f"{node.get('tee')} not supported by verify yet"
+            node_ok, msg = tdx.check(secrets, mounts)
         ok &= node_ok
         print(f"{node.get('name')}\t{node.get('tee')}\t{'ok' if node_ok else 'FAIL'}\t{msg}")
     return ok
@@ -198,16 +198,23 @@ def verify(request: str, manifests: str) -> bool:
 def render(args):
     nodes = load_request(args.request)
     snp_nodes = [n for n in nodes if n.get("tee") == "snp"]
-    tdx_nodes = [n for n in nodes if n.get("tee") == "tdx"]
-    if tdx_nodes:
-        log.warning("TDX is not supported by render yet, skipping %d node(s)", len(tdx_nodes))
-    if not snp_nodes:
-        raise RuntimeError(f"No SNP nodes in {args.request}")
+    has_tdx = any(n.get("tee") == "tdx" for n in nodes)
+    if not snp_nodes and not has_tdx:
+        raise RuntimeError(f"No SNP or TDX nodes in {args.request}")
 
     kbsconfig = json.loads(Path(args.kbsconfig).read_text()) if args.kbsconfig else None
 
-    files, entries = snp.render(snp_nodes)
-    log.info("Downloaded and verified %d VCEK(s)", len(files))
+    files, entries = {}, []
+    if snp_nodes:
+        snp_files, snp_entries = snp.render(snp_nodes)
+        files |= snp_files
+        entries += snp_entries
+        log.info("Downloaded and verified %d VCEK(s)", len(snp_files))
+    if has_tdx:
+        tdx_files, tdx_entries = tdx.render()
+        files |= tdx_files
+        entries += tdx_entries
+        log.info("Downloaded TDX collateral")
 
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
@@ -225,6 +232,12 @@ def render(args):
              "  oc apply --server-side -f %s\n"
              "  oc patch kbsconfig %s -n %s --type merge --patch-file %s",
              out, out / "secrets.yaml", name, args.namespace, out / "kbsconfig.patch")
+    if has_tdx:
+        configmap = (kbsconfig or {}).get("spec", {}).get("kbsConfigMapName", "<kbs-config>")
+        log.warning("TDX: once, set in ConfigMap %s, under "
+                    "[attestation_service.verifier_config.dcap_verifier]:\n"
+                    "  collateral_service = \"%s\"\n"
+                    "and restart Trustee.", configmap, tdx.COLLATERAL_SERVICE)
 
     if args.verify and not verify(args.request, out):
         raise RuntimeError("Verification failed")

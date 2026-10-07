@@ -76,7 +76,7 @@ class TestRender:
         assert f"kds-store/vcek/{HWID}" in patch
         with tarfile.open(bundle) as tar:
             assert sorted(tar.getnames()) == sorted(
-                f"vcek/{HWID}/{n}" for n in ("ark.pem", "ask.pem", VCEK_FILE))
+                f"vcek-{HWID[:16]}/{n}" for n in ("ark.pem", "ask.pem", VCEK_FILE))
 
 
 class TestVerify:

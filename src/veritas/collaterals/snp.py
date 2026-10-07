@@ -134,7 +134,7 @@ def secret_name(hwid: str) -> str:
 def render(nodes: list[dict]) -> tuple[dict, list[dict]]:
     """Download and verify one VCEK per chip, plus the AMD cert chain.
 
-    Returns ({hwid: {file name: bytes}}, cert cache entries for KbsConfig).
+    Returns ({secret name: {file name: bytes}}, cert cache entries for KbsConfig).
     """
     chains, files = {}, {}
     for node in nodes:
@@ -150,4 +150,4 @@ def render(nodes: list[dict]) -> tuple[dict, list[dict]]:
 
     entries = [{"secretName": secret_name(h), "mountPath": f"{VCEK_MOUNT_DIR}/{h}"}
                for h in files]
-    return files, entries
+    return {secret_name(h): f for h, f in files.items()}, entries
