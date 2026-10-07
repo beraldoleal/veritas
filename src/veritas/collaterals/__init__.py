@@ -155,6 +155,46 @@ def write_bundle(path: str, files: dict):
                 tar.addfile(info, io.BytesIO(content))
 
 
+def read_manifests(out: Path) -> tuple[dict, dict]:
+    """Read back the files written by render.
+
+    Returns ({secret name: {file name: bytes}}, {secret name: mount path}).
+    """
+    secrets, name, in_data = {}, None, False
+    for line in (out / "secrets.yaml").read_text().splitlines():
+        key, _, value = line.strip().partition(": ")
+        if key == "name":
+            name, in_data = value, False
+            secrets[name] = {}
+        elif line == "data:":
+            in_data = True
+        elif in_data and line.startswith("  "):
+            secrets[name][key] = base64.b64decode(value)
+
+    mounts, name = {}, None
+    for line in (out / "kbsconfig.patch").read_text().splitlines():
+        key, _, value = line.strip().removeprefix("- ").partition(": ")
+        if key == "secretName":
+            name = value
+        elif key == "mountPath":
+            mounts[name] = value
+    return secrets, mounts
+
+
+def verify(request: str, manifests: str) -> bool:
+    nodes = load_request(request)
+    secrets, mounts = read_manifests(Path(manifests))
+    ok = True
+    for node in nodes:
+        if node.get("tee") == "snp":
+            node_ok, msg = snp.check(node, secrets, mounts)
+        else:
+            node_ok, msg = True, f"{node.get('tee')} not supported by verify yet"
+        ok &= node_ok
+        print(f"{node.get('name')}\t{node.get('tee')}\t{'ok' if node_ok else 'FAIL'}\t{msg}")
+    return ok
+
+
 def render(args):
     nodes = load_request(args.request)
     snp_nodes = [n for n in nodes if n.get("tee") == "snp"]
@@ -186,6 +226,9 @@ def render(args):
              "  oc patch kbsconfig %s -n %s --type merge --patch-file %s",
              out, out / "secrets.yaml", name, args.namespace, out / "kbsconfig.patch")
 
+    if args.verify and not verify(args.request, out):
+        raise RuntimeError("Verification failed")
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="veritas collateral", description=__doc__)
@@ -207,6 +250,12 @@ def main(argv=None):
     p.add_argument("--namespace", default=RVPS_NAMESPACE, help=f"Trustee namespace (default: {RVPS_NAMESPACE})")
     p.add_argument("-o", "--output", default="manifests", help="Output directory (default: manifests)")
     p.add_argument("-b", "--bundle", help="Also write the downloaded files to this tar, for debugging")
+    p.add_argument("--verify", action="store_true", help="Run verify on the output")
+    p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
+    p = sub.add_parser("verify", help="Check the manifests cover every node in the request (offline)")
+    p.add_argument("request", help="request.json from collect")
+    p.add_argument("manifests", help="Directory written by render")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
 
     args = parser.parse_args(argv)
@@ -216,9 +265,12 @@ def main(argv=None):
         format="%(levelname)s: %(message)s",
     )
 
-    if args.command == "render":
+    if args.command in ("render", "verify"):
         try:
-            render(args)
+            if args.command == "render":
+                render(args)
+            elif not verify(args.request, args.manifests):
+                sys.exit(1)
         except (RuntimeError, ValueError, OSError) as e:
             log.error("%s", e)
             sys.exit(1)

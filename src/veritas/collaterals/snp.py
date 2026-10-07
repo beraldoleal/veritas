@@ -4,6 +4,7 @@ import re
 import subprocess
 import tempfile
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -88,12 +89,41 @@ def verify_certs(ark: bytes, ask: bytes, vcek: bytes):
         raise RuntimeError(f"VCEK chain verification failed: {result.stderr.strip()}")
 
 
+def not_after(der: bytes) -> datetime:
+    from cryptography import x509
+    try:
+        return x509.load_der_x509_certificate(der).not_valid_after_utc
+    except ValueError as e:
+        raise RuntimeError(f"Invalid VCEK certificate: {e}")
+
+
 def vcek_file(tcb: dict) -> str:
     """File name Trustee looks up for a given TCB (OfflineStore)."""
     name = "bl{blSPL:02}_tee{teeSPL:02}_snp{snpSPL:02}_ucode{ucodeSPL:02}".format(**tcb)
     if "fmcSPL" in tcb:
         name += f"_fmc{tcb['fmcSPL']:02}"
     return name + "_vcek.der"
+
+
+def check(node: dict, secrets: dict, mounts: dict) -> tuple[bool, str]:
+    """Check the manifests cover a node. Returns (ok, message)."""
+    name = secret_name(node["hwid"])
+    if name not in secrets:
+        return False, f"missing Secret {name}"
+    if mounts.get(name) != f"{VCEK_MOUNT_DIR}/{node['hwid']}":
+        return False, f"{name} not mounted at {VCEK_MOUNT_DIR}/{node['hwid']}"
+    files = secrets[name]
+    vcek = vcek_file(node["tcb"])
+    if vcek not in files:
+        return False, f"{name} has no {vcek}, firmware changed? re-run render"
+    try:
+        expires = not_after(files[vcek])
+        if expires < datetime.now(timezone.utc):
+            return False, f"VCEK expired on {expires:%Y-%m-%d}, re-run render"
+        verify_certs(files.get("ark.pem", b""), files.get("ask.pem", b""), files[vcek])
+    except RuntimeError as e:
+        return False, str(e)
+    return True, f"VCEK expires {expires:%Y-%m-%d}"
 
 
 def secret_name(hwid: str) -> str:
