@@ -1,6 +1,7 @@
 """Unit tests for `veritas collateral render` (no cluster or network needed)."""
 
 import base64
+from datetime import datetime, timezone
 import json
 import shutil
 import tarfile
@@ -76,3 +77,38 @@ class TestRender:
         with tarfile.open(bundle) as tar:
             assert sorted(tar.getnames()) == sorted(
                 f"vcek/{HWID}/{n}" for n in ("ark.pem", "ask.pem", VCEK_FILE))
+
+
+class TestVerify:
+    def render_to(self, tmp_path, node):
+        req = write_request(tmp_path, [node])
+        out = tmp_path / "manifests"
+        collaterals.main(["render", req, "-o", str(out)])
+        return req, out
+
+    def test_ok_shows_expiry(self, tmp_path, offline, capsys):
+        req, out = self.render_to(tmp_path, NODE)
+        collaterals.main(["verify", req, str(out)])
+        assert "ok\tVCEK expires 2030-01-24" in capsys.readouterr().out
+
+    def test_firmware_update_detected(self, tmp_path, offline, capsys):
+        req, out = self.render_to(tmp_path, NODE)
+        updated = {**NODE, "tcb": {**NODE["tcb"], "snpSPL": 23}}
+        write_request(tmp_path, [updated])
+        with pytest.raises(SystemExit):
+            collaterals.main(["verify", req, str(out)])
+        assert "firmware changed? re-run render" in capsys.readouterr().out
+
+    def test_missing_node(self, tmp_path, offline, capsys):
+        req, out = self.render_to(tmp_path, NODE)
+        write_request(tmp_path, [NODE, {**NODE, "name": "new", "hwid": "cd" * 64}])
+        with pytest.raises(SystemExit):
+            collaterals.main(["verify", req, str(out)])
+        assert "missing Secret" in capsys.readouterr().out
+
+    def test_expired(self, tmp_path, offline, capsys, monkeypatch):
+        req, out = self.render_to(tmp_path, NODE)
+        monkeypatch.setattr(snp, "not_after", lambda der: datetime(2020, 1, 1, tzinfo=timezone.utc))
+        with pytest.raises(SystemExit):
+            collaterals.main(["verify", req, str(out)])
+        assert "VCEK expired on 2020-01-01" in capsys.readouterr().out
