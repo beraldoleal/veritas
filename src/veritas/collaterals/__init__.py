@@ -1,14 +1,18 @@
 """Attestation collateral for disconnected clusters."""
 
 import argparse
+import base64
+import io
 import json
 import logging
 import shlex
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 from veritas.collaterals import snp
+from veritas.models import RVPS_NAMESPACE
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +96,97 @@ def collect(nodes: list[str], image: str) -> dict:
     return {"version": REQUEST_VERSION, "nodes": entries}
 
 
+def load_request(path: str) -> list[dict]:
+    request = json.loads(Path(path).read_text())
+    if request.get("version") != REQUEST_VERSION:
+        raise ValueError(f"Unsupported request version: {request.get('version')}")
+    return request["nodes"]
+
+
+def merge_cert_cache(kbsconfig: dict | None, new: list[dict]) -> list[dict]:
+    """Return the full kbsLocalCertCacheSpec.secrets list.
+
+    A merge patch replaces lists, so existing entries must be kept here.
+    """
+    spec = (kbsconfig or {}).get("spec", {})
+    merged = list(spec.get("kbsLocalCertCacheSpec", {}).get("secrets", []))
+    names = {e["secretName"]: i for i, e in enumerate(merged)}
+    for entry in new:
+        i = names.get(entry["secretName"])
+        if i is None:
+            merged.append(entry)
+        elif merged[i] != entry:
+            log.warning("Replacing existing entry for %s", entry["secretName"])
+            merged[i] = entry
+        else:
+            log.info("%s already in KbsConfig", entry["secretName"])
+    return merged
+
+
+def format_secrets(files: dict, namespace: str) -> str:
+    docs = []
+    for hwid, data in files.items():
+        docs.append(
+            f"apiVersion: v1\n"
+            f"kind: Secret\n"
+            f"metadata:\n"
+            f"  name: {snp.secret_name(hwid)}\n"
+            f"  namespace: {namespace}\n"
+            f"type: Opaque\n"
+            f"data:\n"
+            + "".join(f"  {k}: {base64.b64encode(v).decode()}\n" for k, v in data.items()))
+    return "---\n".join(docs)
+
+
+def format_patch(entries: list[dict]) -> str:
+    lines = ["spec:", "  kbsLocalCertCacheSpec:", "    secrets:"]
+    for e in entries:
+        lines.append(f"    - secretName: {e['secretName']}")
+        lines.append(f"      mountPath: {e['mountPath']}")
+    return "\n".join(lines) + "\n"
+
+
+def write_bundle(path: str, files: dict):
+    with tarfile.open(path, "w") as tar:
+        for hwid, data in files.items():
+            for name, content in data.items():
+                info = tarfile.TarInfo(f"vcek/{hwid}/{name}")
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+
+
+def render(args):
+    nodes = load_request(args.request)
+    snp_nodes = [n for n in nodes if n.get("tee") == "snp"]
+    tdx_nodes = [n for n in nodes if n.get("tee") == "tdx"]
+    if tdx_nodes:
+        log.warning("TDX is not supported by render yet, skipping %d node(s)", len(tdx_nodes))
+    if not snp_nodes:
+        raise RuntimeError(f"No SNP nodes in {args.request}")
+
+    kbsconfig = json.loads(Path(args.kbsconfig).read_text()) if args.kbsconfig else None
+
+    files, entries = snp.render(snp_nodes)
+    log.info("Downloaded and verified %d VCEK(s)", len(files))
+
+    out = Path(args.output)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "secrets.yaml").write_text(format_secrets(files, args.namespace))
+    (out / "kbsconfig.patch").write_text(format_patch(merge_cert_cache(kbsconfig, entries)))
+    if args.bundle:
+        write_bundle(args.bundle, files)
+        log.info("Written %s", args.bundle)
+
+    if not kbsconfig:
+        log.warning("No --kbsconfig given: the patch replaces any existing "
+                    "kbsLocalCertCacheSpec entries")
+    name = kbsconfig["metadata"]["name"] if kbsconfig else "<kbsconfig>"
+    log.info("Written %s. On the Trustee cluster run:\n"
+             "  oc apply --server-side -f %s\n"
+             "  oc patch kbsconfig %s -n %s --type merge --patch-file %s",
+             out, out / "secrets.yaml", name, args.namespace, out / "kbsconfig.patch")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="veritas collateral", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -104,12 +199,30 @@ def main(argv=None):
     p.add_argument("-y", "--yes", action="store_true", help="Do not ask for confirmation")
     p.add_argument("-o", "--output", default="request.json", help="Output file (default: request.json)")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
+    p = sub.add_parser("render", help="Download collateral and write Trustee manifests (needs internet)")
+    p.add_argument("request", help="request.json from collect")
+    p.add_argument("--kbsconfig", help="Current KbsConfig as JSON (oc get kbsconfig NAME -o json), "
+                   "so existing cert cache entries are kept")
+    p.add_argument("--namespace", default=RVPS_NAMESPACE, help=f"Trustee namespace (default: {RVPS_NAMESPACE})")
+    p.add_argument("-o", "--output", default="manifests", help="Output directory (default: manifests)")
+    p.add_argument("-b", "--bundle", help="Also write the downloaded files to this tar, for debugging")
+    p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s: %(message)s",
     )
+
+    if args.command == "render":
+        try:
+            render(args)
+        except (RuntimeError, ValueError, OSError) as e:
+            log.error("%s", e)
+            sys.exit(1)
+        return
 
     try:
         names = args.nodes or list_nodes(args.selector)

@@ -1,11 +1,16 @@
 """AMD SEV-SNP collateral (VCEK certificates)."""
 
 import re
-from urllib.parse import parse_qs, urlparse
+import subprocess
+import tempfile
+import urllib.request
+from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlparse
 
 KDS_HOST = "kdsintf.amd.com"
 PRODUCTS = {"Milan", "Genoa", "Turin"}
 TCB_FIELDS = ("blSPL", "teeSPL", "snpSPL", "ucodeSPL", "fmcSPL")
+VCEK_MOUNT_DIR = "/opt/confidential-containers/attestation-service/kds-store/vcek"
 
 
 def parse_vcek_url(url: str) -> dict:
@@ -34,3 +39,85 @@ def parse_vcek_url(url: str) -> dict:
         tcb[key] = spl
 
     return {"product": product, "hwid": hwid, "tcb": tcb}
+
+
+def vcek_url(node: dict) -> str:
+    """Build the KDS URL for a request entry, validating it on the way."""
+    try:
+        url = (f"https://{KDS_HOST}/vcek/v1/{node['product']}/{node['hwid']}?"
+               + urlencode(node["tcb"]))
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"{node.get('name')}: malformed SNP entry: {e}")
+    parse_vcek_url(url)
+    return url
+
+
+def fetch(url: str) -> bytes:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return r.read()
+    except OSError as e:
+        raise RuntimeError(f"Failed to download {url}: {e}")
+
+
+def cert_chain_url(product: str) -> str:
+    return f"https://{KDS_HOST}/vcek/v1/{product}/cert_chain"
+
+
+def split_cert_chain(pem: bytes) -> dict:
+    """Split the KDS cert_chain (ASK then ARK) into snpguest file names."""
+    end = b"-----END CERTIFICATE-----\n"
+    certs = [c.strip() + b"\n" + end for c in pem.split(end.strip()) if c.strip()]
+    if len(certs) != 2:
+        raise RuntimeError(f"Expected ASK and ARK in cert_chain, got {len(certs)} certificates")
+    return {"ask.pem": certs[0], "ark.pem": certs[1]}
+
+
+def verify_certs(ark: bytes, ask: bytes, vcek: bytes):
+    """Check the VCEK chains up to the ARK with `snpguest verify certs`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, data in (("ark.pem", ark), ("ask.pem", ask), ("vcek.der", vcek)):
+            (Path(tmp) / name).write_bytes(data)
+        try:
+            result = subprocess.run(["snpguest", "verify", "certs", tmp],
+                                    capture_output=True, text=True)
+        except FileNotFoundError:
+            raise RuntimeError("snpguest not found: run veritas from the coco-tools "
+                               "image or install snpguest")
+    if result.returncode != 0:
+        raise RuntimeError(f"VCEK chain verification failed: {result.stderr.strip()}")
+
+
+def vcek_file(tcb: dict) -> str:
+    """File name Trustee looks up for a given TCB (OfflineStore)."""
+    name = "bl{blSPL:02}_tee{teeSPL:02}_snp{snpSPL:02}_ucode{ucodeSPL:02}".format(**tcb)
+    if "fmcSPL" in tcb:
+        name += f"_fmc{tcb['fmcSPL']:02}"
+    return name + "_vcek.der"
+
+
+def secret_name(hwid: str) -> str:
+    # The operator uses the Secret name as volume name (max 63 chars).
+    return f"vcek-{hwid[:16]}"
+
+
+def render(nodes: list[dict]) -> tuple[dict, list[dict]]:
+    """Download and verify one VCEK per chip, plus the AMD cert chain.
+
+    Returns ({hwid: {file name: bytes}}, cert cache entries for KbsConfig).
+    """
+    chains, files = {}, {}
+    for node in nodes:
+        url = vcek_url(node)
+        if node["hwid"] in files:
+            continue
+        product = node["product"]
+        if product not in chains:
+            chains[product] = split_cert_chain(fetch(cert_chain_url(product)))
+        vcek = fetch(url)
+        verify_certs(chains[product]["ark.pem"], chains[product]["ask.pem"], vcek)
+        files[node["hwid"]] = {**chains[product], vcek_file(node["tcb"]): vcek}
+
+    entries = [{"secretName": secret_name(h), "mountPath": f"{VCEK_MOUNT_DIR}/{h}"}
+               for h in files]
+    return files, entries
